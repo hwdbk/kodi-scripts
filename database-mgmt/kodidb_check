@@ -1,0 +1,798 @@
+#!/bin/bash
+# kodidb_check - a utility to check, clean up and manage the kodi MyVideos database
+
+_usage() {
+	echo "usage: $(basename "$0") [options] [args]" >&2
+	echo "        [-db, --database file]                   use file as database instead of the default $vdb, followed by one of the functions below:" >&2
+	echo "         -l,  --list                             will scan the data base and lists output that can be filtered with grep. idFile or idPath is in the 2nd column. does not modify the database" >&2
+	echo "         -c,  --check                            will scan the data base and lists inconsistencies. does not modify the database" >&2
+	echo "         -df, --delete-file [-f] [-g] file ...   delete the file(s) specified by localpath or idFile and associated record(s) from the database, if allowed (i.e. not in use by a movie), or force [-f]" >&2
+	echo "         -dp, --delete-path [-f] [-g] path ...   cleanup path record(s) specified by localpath or idPath from the database incl. subpaths, insofar allowed (i.e. not a scrape dir and no subpaths/files), or force [-f]" >&2
+	echo "         -fp, --fix-paths                        scan and fix the directory structure in the database" >&2
+	echo "         -rf, --remap-file file newlocalpath     remap the file specified by localpath or idFile to the (existing) newlocalpath file" >&2
+	echo "         -rp, --remap-path path newlocalpath     remap the path specified by localpath or idPath to the (existing) newlocalpath directory" >&2
+	echo "         -mw, --mark-watched[=<num>] file ...    bump the playcount of the file(s) specified by localpath or idFile or set playcount to <num>, if specified. creates the file(s) in the database if not exists" >&2
+	echo >&2
+	echo "    utilities for analysis and cleanup of the database (all commands read an output log formatted/produced by '$(basename "$0") -l' from stdin):" >&2
+	echo "              --summary                          print summary of the various categories of files in log" >&2
+	echo "              --delete-unref                     remove all read 'unref' file records from database (i.e. files that are labelled as 'unreferenced' in the log)" >&2
+	echo "              --clean-root                       cleanup the directory structure starting from the root dir in the database, insofar paths are not used" >&2
+	echo "              --remap-foundone                   remap all read 'foundone' files to the exact match listed in the log" >&2
+	echo "              --remap-foundlike                  remap all read 'foundlike' files to the almost exact match listed in the log (matched without extension)" >&2
+	echo "              --list-founddup [--pick]           list the read duplicate matches in a more readable form and, with --pick, present a prompt where the user can pick any of the found duplicates" >&2
+	echo "              --list-notfound [--pick]           list all read 'notfound' files and, with --pick, present a prompt remap the file interactively. use this if you can drop file paths on the prompt" >&2
+	echo "              --rename-founddup oldstr newstr    remap files with duplicate matches after substituting oldstr with newstr in the full path" >&2
+	echo "              --rename-notfound oldstr newstr    remap files which weren't found after substituting oldstr with newstr in the full path" >&2
+	echo >&2
+	echo "constraints: movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)" >&2
+	echo "limitations: does not scan or check for musicvideos, episodes, tvshows" >&2
+	echo "             tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (has / in the paths, not \\)" >&2
+	echo "             tested on linux-gnu and darwin21 (Mac OS X will require bash >=4 (for mapfile), which can be obtained from MacPorts or Brew)" >&2
+	exit 1
+}
+
+set -u # let script exit if an unsed variable is used (at runtime)
+
+# FILES
+
+vdb=MyVideos119.db
+localindex=fileindex.fst
+cmdlog=history.log
+
+# CONSTANTS
+
+readonly localsources=(/mnt/media/video/movies /mnt/media/video/incoming)
+readonly localroot=/mnt/media/
+readonly kodiroot=smb://192.168.2.101/
+readonly extensions=( "*.ts" "*.mp4" "*.m4v" "*.mkv" "*.avi" "*.vob" "*.iso" "*.mov" "*.MOV" "*.wmv" "*.mpg" "*.mpeg" ) # note: the .MOV is only for camera files
+
+# the --list output messages:
+readonly f_unref=(      "f_isunref_______" )
+readonly f_movie=(      "f_hasmovie______" )
+readonly f_bookmark=(   "f_hasbookmark___" )
+readonly f_playcount=(  "f_hasplaycount__" )
+readonly f_foundone=(   "f_foundone______" )
+readonly f_foundlike=(  "f_foundlike_____" )
+readonly f_founddup=(   "f_founddup______" )
+readonly f_notfound=(   "f_notfound______" )
+readonly p_root=(       "p_root__________" )
+readonly p_content=(    "p_content_______" )
+readonly p_noparent=(   "p_noparent______" )
+readonly p_unref=(      "p_unref_________" )
+readonly p_found=(      "p_found_________" )
+readonly p_notfound=(   "p_notfound______" )
+
+# setup arguments for media files (from extensions), to be used as a file name selector in a 'find' statement
+nameargs=("(") ; for (( n=0 ; n<${#extensions[@]} ; n++ )) ; do if (( n>0 )) ; then nameargs+=(-o) ; fi ; nameargs+=(-name "${extensions[n]}") ; done ; nameargs+=(")")
+
+# FUNCTTIONS
+
+_kodi2local() { # kodipath - translate kodi db path to local representation ; works for dirs, files and full paths
+	local str=$1
+	if [[ $str == "$kodiroot"* ]] ; then str="$localroot${str#"$kodiroot"}" ; fi
+	str=${str///*}  # special chr used for *
+	str=${str///?}  # special chr used for ?
+	str=${str///\"} # special chr used for "
+	if [[ $OSTYPE == darwin* ]] ; then str=$(syn2mac <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
+	echo "$str"
+}
+
+_local2kodi() { # [-sql] localPath - translate local path to kodi db representation ; works for dirs, files and full paths
+	if [[ $1 == -sql ]] ; then
+		shift ; set -- "$(_sqlescape "$1")"
+	fi
+	local str=$1
+	if [[ $str == "$localroot"* ]] ; then str="$kodiroot${str#"$localroot"}" ; fi
+	if [[ $OSTYPE == darwin* ]] ; then str=$(mac2syn <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
+	str=${str//\*/} # special chr used for *
+	str=${str//\?/} # special chr used for ?
+	str=${str//\"/} # special chr used for "
+	echo "$str"
+}
+
+_createlocalindex() { # output_file - create a local index of files that are considered as database file candidates
+		local out=$1
+		echo "creating local index in $out" >&2
+		local printargs=(-printf "%TY%Tm%Td_%TH%TM%TS\t%s\t-\t%p\n")
+		local filter=(sed -e 's/\(^........_......\)\.[0-9]*\t/\1\t/') # filter to postprocess find output (note: can not contain proc | otherproc). here: strip the subsecond part of the timestamp
+		# carefully construct the index of files to be considered as database file sources
+		find -L "${localsources[@]}" -type f ! -path '*/@eaDir/*' "${nameargs[@]}" "${printargs[@]}" | "${filter[@]}" > "$out"
+}
+
+_urlencode_kodi() { # <string>
+	# replicate the exact way that kodi urlencodes urls, as in the art table
+	# this can be checked by running:
+	# sqlite3 MyVideos119.db "select m.c22,a.url from movie m join art a on a.media_id=m.idMovie and a.media_type='movie' where a.url like 'image:%'" | while IFS='|' read a b ; do if [[ "$b" != "image://video@$(kodidb_check -u "$a")/" ]] ; then echo "$a" ; fi ; done
+	# which will print all non-compliant entries (there should be none)
+	local url= i c h LC_CTYPE=C LC_COLLATE=C LC_ALL= LANG=
+	for (( i = 0; i < ${#1} ; i++ )); do
+		c="${1:$i:1}"
+		if [[ $c =~ [-a-zA-Z0-9.~_@!\(\)] ]] ; then # these are the chrs that are printed as is
+			url+="$c"
+		else # print as %hex
+			printf -v h "%02x" "'$c" # no idea what this ' is doing here, but it's needed
+			url+="%$h"
+		fi
+	done
+	echo "$url"
+}
+
+_sqlescape() { # str - escape a string for use in an sql query
+	echo "$(sed -e "s/'/''/g" <<< "$1")" # AFAIK only the ' is special in WHERE clauses. LIKE clauses are quite a different thing. storing a '|' as part of a string could also be special
+}
+
+_query() { # querystr - perform sql query
+	sqlite3 "$vdb" <<< "$1"
+}
+
+_getcolumns() { # querystr var1 var2 ... - perform sql query and store result columns in bash variables var1, var2, ...
+	local query=$1 ; shift
+	IFS='|' read $@ < <(_query "$query") # this little fucker took me two hours
+	# the problem was that 1) std read ALWAYS stops at the first \n, regardless of how many variables need to be read
+	# 2) read skips multiple delimiters if IFS is any of whitespace 3) IFS=delim read a b c d is very different from read -d delim a b c d
+}
+
+_getcolumns_arr() { # querystr array - read all returned columns into array
+	local query=$1 ; local arr=$2 ; local c
+	eval "$arr"="()" # create empty or clear existing array
+	eval mapfile -d "'|'" -t "$arr" < <(_query "$query") # mapfile never skips multiple adjacent occurrences of the delimiter
+}
+
+_fillcolumnvalues() { # "col1,..." value(s) - fill values in the positional parameter placeholders #, e.g. _fillcolumnvalues "strPath=,idPath,strFilename" "${arr[@]}"
+	local cols=() ; mapfile -d ',' -t cols <<< "$1" ; shift
+	local str= ; local i ; local n=0
+	for i in "$@" ; do if [[ -n $str ]] ; then str="$str," ; fi ; str="$str${cols[n]}='$i'" ; ((n++)) ; done # writing all column values as ='string' also works for numbers and null values (in sqlite)
+	echo "$str"
+}
+
+_ismediafile() { # localPath
+	for i in "${extensions[@]}" ; do [[ $1 == $i ]] && return 0 ; done
+	return 1 # not one of the listed extensions: not a media file
+}
+
+_getfullpath() { # path - convert a path (relative, or containing ../ or ./ to a full path)
+	local f=$1 ; if [[ $f != /* ]] ; then f="${PWD#/}/$f" ; fi # prepend f with PWD without the leading / (will be re-added on printout)
+	local p=() ; mapfile -d '/' -t p <<< "$f"
+	local o=()
+	local i ; for i in "${p[@]}" ; do
+		if [[ $i == "" ]] ; then continue
+		elif [[ $i == "." ]] ; then continue
+		elif [[ $i == ".." ]] ; then unset 'o[-1]' # pop last element from array (this notation requires bash >=4.3)
+		else o+=("$i")
+		fi
+	done
+	for i in "${o[@]}" ; do echo -n "/$i" ; done
+	# last element has a \n (left over from mapfile) so no need to print one
+}
+
+_findfile() { # fullpath - find a file in the database. fullpath can be a localpath or a unix full path or a url (except plugin://www.youtube.com/... is formatted strangely and doesn't work)
+ 	_query "SELECT idFile FROM files f JOIN path p ON p.idPath=f.idPath WHERE p.strPath='$(_local2kodi -sql "${1%/*}/")' AND f.strFilename='$(_local2kodi -sql "${1##*/}")'"
+}
+
+_findpath() { # fullpath - find a path in the database. fullpath can be a localpath or a unix full path or a url (except plugin://www.youtube.com/... is formatted strangely and doesn't work)
+ 	_query "SELECT idPath FROM path p WHERE p.strPath='$(_local2kodi -sql "${1%/}/")'" # strPath always ends with a /
+}
+
+_getfileid() { # <string> - get an idFile from a) an idFile b) an existing localpath c) a non-existing localpath, but existing in the database
+	local f=$1
+	local idFile=
+	if [[ $f =~ ^[0-9]*$ ]] ; then # it's a number - assume it is an id already
+		idFile=$(_query "SELECT idFile FROM files WHERE idFile=$f") # see if it exists in the database
+	elif _ismediafile "$f" && [[ -f $f || $f == "$localroot"* ]] ; then # it is a media file, existing localfile (file or symlink) or non-existing localpath in the right format
+		idFile=$(_findfile "$(_getfullpath "$f")")
+	elif [[ ( $f == *://* || $f == /*/* ) && $f != */ && $f != *@eaDir* ]] ; then # catch iso9660://DISK, removable://path and /var/media/.... , but make sure it is not a directory
+		idFile=$(_findfile "$f")
+	else
+		echo "$f: invalid parameter" >&2 ; return 1
+	fi
+	echo $idFile
+}
+
+_getpathid() { # <string> - get an idPath from a) an idPath b) an existing localpath c) a non-existing localpath, but existing in the database
+	local f=$1
+	local idPath=
+	if [[ $f =~ ^[0-9]*$ ]] ; then # it's a number - assume it is an id already
+		idPath=$(_query "SELECT idPath FROM path WHERE idPath=$f") # see if it exists in the database
+	elif [[ -d $f || $f == "$localroot"* ]] ; then # it is an existing localfile (directory or symlink) or non-existing localpath in the right format
+		idPath=$(_findpath "$(_getfullpath "${f%/}/")") # make sure f ends with a /
+	elif [[ ( $f == *://* || $f == /* ) && $f == */ && $f != *@eaDir* ]] ; then # catch iso9660://DISK, removable://path and /var/media/.... , but must end in a /
+		idPath=$(_findpath "$f")
+	else
+		echo "$f: invalid parameter" >&2 ; return 1
+	fi
+	echo $idPath
+}
+
+_createfile() { # [-g] localPath - create a (new) file in the database, attach it to the parent idPath and return its idFile (note: does not check if path exists in $localroot)
+	local debug= ; if [[ $1 == -g ]] ; then debug=-g ; shift ; fi
+	f=$(_getfullpath "$1")
+	if [[ $f != "$localroot"* ]] ; then echo ; return 1 ; fi # can only create paths where localPath is a subdirectory of $localroot
+	local idPath=$(_createpath $debug "$(dirname "$f")")
+	local idFile=$(_query "SELECT idFile FROM files WHERE idPath=$idPath AND strFilename='$(_local2kodi -sql "$(basename "$f")")'")
+	if [[ -n $idFile ]] ; then
+		if [[ -n $debug ]] ; then echo "INFO: createfile: found existing file $idFile=$f" >&2 ; fi
+	else
+		# file does not exist in the database - create
+		idFile=$(_query "INSERT INTO files (idPath,strFilename,dateAdded) VALUES ($idPath,'$(_local2kodi -sql "$(basename "$f")")','$(date "+%Y-%m-%d %H:%M:%S")') ; SELECT LAST_INSERT_ROWID()")
+		if [[ -n $debug ]] ; then echo "INFO: createfile: created new file $idFile=$f" >&2 ; fi
+	fi
+	echo $idFile
+}
+
+_createpath() { # [-g] localPath - create a (new) path in the database, attach it to the parent idPath and return its idPath (note: does not check if path exists in $localroot)
+	local debug= ; if [[ $1 == -g ]] ; then debug=-g ; shift ; fi
+	if [[ $1 != "$localroot"* ]] ; then echo ; return 1 ; fi # can only create paths where localPath is a subdirectory of $localroot
+	local sqlstr=$(_local2kodi -sql "${1%/}/") ; # make sure sqlstr always ends with a /
+	local idPath ; local idParentPath
+	# check if we're at the root - some MyVideos.db don't have the root path record (in fact, a lot of path records have no parent filled in)
+	if [[ $1 == "$localroot" ]] ; then
+		idPath=$(_query "SELECT idPath FROM path WHERE strPath='$sqlstr'")
+		if [[ -z $idPath ]] ; then
+			idPath=$(_query "INSERT INTO path (strPath) VALUES ('$sqlstr') ; SELECT LAST_INSERT_ROWID()")
+			if [[ -n $debug ]] ; then echo "INFO: created root path record $idPath for $1 (no parent)" >&2 ; fi
+#		else
+#			if [[ -n $debug ]] ; then echo "found root record $idPath" >&2 ; fi
+		fi
+		echo $idPath
+		return
+	fi
+	# first see if the dir already exists in the database
+	_getcolumns "SELECT idPath,idParentPath FROM path WHERE strPath='$sqlstr'" idPath idParentPath
+	# first find the (real) parent
+#	if [[ -n $debug ]] ; then echo "trying to find parent $(dirname "$1")/ of $sqlstr" >&2 ; fi
+	local parent=$(_createpath $debug "$(dirname "$1")/") # recurse by finding or creating the parent path
+	if [[ -z $idPath ]] ; then # path does not exist - create path in database
+		if [[ -n $parent ]] ; then
+			if [[ -n $debug ]] ; then echo "INFO: creating path $1 in parent $parent" >&2 ; fi
+			idPath=$(_query "INSERT INTO path (strPath,idParentPath) VALUES ('$sqlstr',$parent) ; SELECT LAST_INSERT_ROWID()")
+		fi
+	elif [[ $idParentPath != $parent ]] ; then # path exists, but parent path is not filled in properly - update record
+		if [[ -n $debug ]] ; then echo "INFO: updating parent id in $idPath from '$idParentPath' to $parent" >&2 ; fi
+		_query "UPDATE path SET idParentPath=$parent WHERE idPath=$idPath"
+	fi
+	echo $idPath
+}
+
+_deletefile() { # [-f] [-g] idFile - delete the specified file record from the files table after cleaning up all referenced records (bookmark, settings, streamdetails), but only if the file is not used by a movie
+	local force= ; if [[ $1 == -f ]] ; then force=-f ; shift ; fi
+	local debug= ; if [[ $1 == -g ]] ; then debug=-g ; shift ; fi
+	local idFile=$1
+	local idMovie title
+	# make sure that the file is not used by a movie
+	_getcolumns "SELECT idMovie,c00 FROM movie WHERE idFile=$idFile" idMovie title
+	if [[ -n $idMovie && -n $force ]] ; then
+		if [[ -n $debug ]] ; then echo "WARNING: $idFile is used by movie id=$idMovie ($title) and will be deleted" >&2 ; fi
+		_deletemediacollateral $idMovie "movie"
+	fi
+	# > here one would insert code to check if the file is not used by a musicvideo, episode, tvshow, etc.
+	local playcount bid
+	_getcolumns "SELECT IFNULL(f.playCount,0),b.idFile FROM files f LEFT JOIN bookmark b ON b.idFile=f.idFile WHERE f.idFile=$idFile" playcount bid
+	if [[ $playcount != 0 && -z $force ]] ; then
+		if [[ -n $debug ]] ; then echo "WARNING: $idFile has playcount $playcount and will not be deleted (use -f to override)" >&2 ; fi
+		return 1
+	fi
+	if [[ -n $bid && -z $force ]] ; then
+		if [[ -n $debug ]] ; then echo "WARNING: $idFile has a bookmark and will not be deleted (use -f to override)" >&2 ; fi
+		return 1
+	fi
+	# once here, we're all good to go and delete the file record after deleting all associated stuff
+	_query "DELETE FROM bookmark WHERE idFile=$idFile"
+	_query "DELETE FROM settings WHERE idFile=$idFile"
+	_query "DELETE FROM streamdetails WHERE idFile=$idFile"
+	_query "DELETE FROM files WHERE idFile=$idFile"
+}
+
+_deletepath() { # [-f] [-g] idPath - clean the specified path record from the database incl. subpaths, but only if they are not used for scraping or have file records
+	local force= ; if [[ $1 == -f ]] ; then force=-f ; shift ; fi # TODO this is tricky
+	local debug= ; if [[ $1 == -g ]] ; then debug=-g ; shift ; fi
+	local idPath=$1
+	# do a depth-first traversal of subpaths
+	local any= p ; for p in $(_query "SELECT idPath FROM path WHERE idParentPath=$idPath") ; do
+		if ! _deletepath $force $debug $p ; then any=y ; fi # recurse, but if any of the subpath(s) can't be deleted, this path can't either
+	done
+	if [[ -n $any ]] ; then
+		if [[ -n $debug ]] ; then echo "WARNING: path $idPath has subpaths which couldn't be deleted - can't delete this path either" >&2 ; fi
+		return 1
+	fi
+	# make sure this path is not used by (a) file(s)
+	local files=$(_query "SELECT idFile FROM files WHERE idPath=$idPath" | tr '\n' ' ')
+	if [[ -n $files ]] ; then
+		if [[ -n $force ]] ; then
+			local f ; for f in $files ; do
+				if [[ -n $debug ]] ; then echo "WARNING: deleting file $f" >&2 ; fi
+				if ! _deletefile $force $debug $f ; then
+					if [[ -n $debug ]] ; then echo "ERROR: file id=$f could not be deleted" >&2 ; fi
+					return 1
+				fi
+			done
+		else
+			if [[ -n $debug ]] ; then echo "WARNING: path $idPath is used by file(s) id=$files and will not be deleted" >&2 ; fi
+			return 1
+		fi
+	fi
+	# make sure this path is not used for scraping
+	local content scraper pn
+	_getcolumns "SELECT strContent,strScraper,strPath FROM path WHERE idPath=$idPath" content scraper pn
+	pn=$(_kodi2local "$pn")
+	if [[ -n $content || -n $scraper ]] ; then
+		if [[ -n $force ]] ; then
+			if [[ -n $debug ]] ; then echo "WARNING: path $idPath=$pn, used for scanning content ($content,$scraper), will be deleted" >&2 ; fi
+		else
+			if [[ -n $debug ]] ; then echo "WARNING: path $idPath=$pn is used for scanning content ($content,$scraper) and will not be deleted" >&2 ; fi
+			return 1
+		fi
+	fi
+	# here one would insert code to check if the file is not used by a musicvideo, episode, tvshow, etc.
+	echo "INFO: deleting path $idPath=$pn" >&2
+	_query "DELETE FROM path WHERE idPath=$idPath"
+}
+
+_deletemediacollateral() { # media_id media_type - delete all collateral records associated with media_id,media_type
+	_query "DELETE FROM art WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM actor_link WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM director_link WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM studio_link WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM country_link WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM tag_link WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM rating WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM uniqueid WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM writer_link WHERE media_id=$1 AND media_type='$2'"
+	_query "DELETE FROM genre_link WHERE media_id=$1 AND media_type='$2'"
+}
+
+_remapfile() { # idFile localPath - remap file record idFile so it points to the specified new location (localpath). if a file already exists at that path, idFile is merged with the existing and deleted
+	local idFile=$1
+	# get some properties of the file that needs to be changed
+	local id ; local p ; local f ; _getcolumns "SELECT idFile,p.strPath,f.strFilename FROM path p, files f WHERE f.idFile=$idFile AND p.idPath=f.idPath" id p f
+	if [[ -z $id ]] ; then
+		echo "ERROR: file $idFile does not exist" >&2
+		return 1
+	fi
+	local lpf=$(_kodi2local "$p$f")
+	# get some properties of where it needs to go (target path)
+	local tgt=$2
+	local fn=$(basename "$tgt") ; local fnx=$(_local2kodi -sql "$fn")
+	local pn=$(dirname "$tgt")  ; local pnx=$(_local2kodi -sql "$pn")
+	local idPath=$(_createpath "$pn") # note that we create the path (or find it if already exists) and not rename the path: this could detach other files unintentionally and would render the strHash invalid
+	local ixFile=$(_query "SELECT idFile FROM files WHERE idPath=$idPath AND idFile<>$idFile AND strFilename='$fnx'") # see if there is already an existing record for this path/file (returns 0 or 1 item)
+	if [[ -n $ixFile ]] ; then
+		# file already exists: different record (ixFile), but already at $tgt (same idPath, same strFilename)
+		echo "WARNING: $idFile=$lpf will be merged into $ixFile=$tgt" >&2
+		# merge records into ixFile
+		#   update movies
+		local idMovie=$(_query "SELECT idMovie FROM movie WHERE idFile=$idFile")
+		local ixMovie=$(_query "SELECT idMovie FROM movie WHERE idFile=$ixFile")
+		if [[ -n $idMovie && -n $ixMovie ]] ; then
+			echo "WARNING: movie $idMovie for file $idFile ($lpf) is duplicate: removing" >&2
+			_query "DELETE FROM movie WHERE idMovie=$idMovie" # both have a movie: ditch the one from idFile <<<!!! what about movie-related records?
+		elif [[ -z $ixMovie && -n $idMovie ]] ; then # idFile has a movie but ixFile does not: reassign the one from idFile
+			echo "INFO: updating movie $idMovie ($lpf) so it is reassigned from file $idFile to $ixFile ($tgt)" >&2
+			_query "UPDATE movie SET idFile=$ixFile WHERE idMovie=$idMovie" # relink idMovie to ixFile; path is already ok
+		fi
+		# > here one would insert code to update/select the musicvideo, episode, tvshow, etc. if ixFile was used by any of these
+		#  merge play state : bookmark
+		local idb idt ; _getcolumns "SELECT idBookmark,timeInSeconds FROM bookmark WHERE idFile=$idFile" idb idt
+		local ixb ixt ; _getcolumns "SELECT idBookmark,timeInSeconds FROM bookmark WHERE idFile=$ixFile" ixb ixt
+		if [[ -n $idb && -n $ixb ]] ; then
+			# both have a bookmark: ditch the one from idFile and keep the one from ixFile, i.e. from the file that was already there, but keep the highest player progress (timeInSeconds)
+			echo "WARNING: bookmark $idb for file $idFile ($lpf) is superfluous: will be removed" >&2
+			if (( $(echo "$idt > $ixt" | bc -l) )) ; then # floating point compare needs bc
+				echo "INFO: updating timeInSeconds in file $ixFile from $ixt to $idt" >&2
+				_query "UPDATE bookmark SET timeInSeconds=$idt WHERE idBookmark=$ixb"
+			fi
+		elif [[ -z $ixb && -n $idb ]] ; then # idFile has a bookmark but ixFile does not: reassign the one from idFile
+			echo "INFO: transferring bookmark $idb ($lpf) so it is reassigned from file $idFile to $ixFile ($tgt)" >&2
+			_query "UPDATE bookmark SET idFile=$ixFile WHERE idBookmark=$idb" # relink idBookmark to ixFile
+		fi
+		#  merge play state : file.playCount; this works because both records idFile and ixFile exist
+		local a=$(_query "SELECT ifnull(playCount,0) FROM files WHERE idFile=$idFile")
+		local b=$(_query "SELECT ifnull(playCount,0) FROM files WHERE idFile=$ixFile")
+		if (( a > b )) ; then
+			echo "INFO: updating playCount in file $ixFile from $b to $a" >&2
+			_query "UPDATE files SET playCount=$a WHERE idFile=$ixFile" # a>=1 so no need to (re)set to null, ever
+		fi
+		# finally, ditch idFile and associates
+		_deletefile -f $idFile
+		# for ixFile, the file that now points to $tgt, none of the stored path strings have changed, so no need to update its files.idPath, files.strFilename, movie.c22 or art.url
+	elif [[ $tgt != "$lpf" ]] ; then
+		# update idFile, located in idPath to make it point to $tgt
+		echo "INFO: updating file $idFile=$lpf to point to $tgt" >&2
+		_query "UPDATE files SET idPath=$idPath,strFilename='$fnx' WHERE idFile=$idFile"
+		_query "UPDATE movie SET c22='$pnx$fnx' WHERE idFile=$idFile"
+		_query "UPDATE art SET url='image://video@$(_urlencode_kodi "$tgt")/' WHERE art_id=(SELECT a.art_id FROM movie m join art a on a.media_id=m.idMovie and a.media_type='movie' WHERE m.idFile=$idFile AND a.url LIKE 'image:%')"
+		# _query "UPDATE movieview SET ..." - not necessary: this is a table view and is auto-dynamic
+		_query "DELETE FROM streamdetails WHERE idFile=$idFile" # file has changed - ditch the streamdetails, but leave the playback settings
+	elif [[ $tgt == "$lpf" ]] ; then
+		echo "INFO: file $idFile already points to $tgt" >&2
+	else
+		echo "ERROR: internal error on _remapfile $idFile=$lpf to $tgt" >&2 # this shouldn't happen
+	fi
+}
+
+_remappath() { # idPath localpath - remap idPath so it (and its children) point to the specified new location (localpath)
+	local idPath ; local strPath
+	_getcolumns "SELECT idPath,strPath FROM path WHERE idPath=$1" idPath strPath
+	if [[ -z $idPath ]] ; then
+		echo "ERROR: path $1 does not exist" >&2
+		return 1
+	fi
+	local lpf="${2%/}/" # make sure lpf always ends with a /
+	# there are two ways to do this: change the path of path idPath to lpf and update all children of idPath.
+	# however, if a path record for lpf already exists, we need to move and merge its children to idPath as well.
+	# or, we create/find the new path, move the the children idPath to the new path and ditch the old path (which is simpler).
+	# the only drawback is that after this call, idPath may no longer exist. PS> _remapfile works in a similar way.
+	local newPath=$(_createpath "$lpf") # create path if not exists
+	if [[ $newPath != $idPath ]] ; then # new path is a different path - remap path
+		echo "INFO: updating path $idPath=$(_kodi2local "$strPath") to point to $lpf" >&2
+		# transfer path specs
+		local coldef="strContent,strScraper,scanRecursive,useFolderNames,strSettings,noUpdate,exclude,dateAdded,allAudio"
+		_getcolumns_arr "SELECT "$coldef" FROM path WHERE idPath=$idPath" cols
+		_query "UPDATE path SET $(_fillcolumnvalues "$coldef" "${cols[@]}") WHERE idPath=$newPath"
+		# update all the child files
+		local idf ; local fn
+		_query "SELECT idFile,strFilename FROM files WHERE idPath=$idPath" | while IFS='|' read idf fn ; do
+			_remapfile $idf "$lpf$(_kodi2local "$fn")"
+		done
+		# update the child paths
+		local idp ; local pn
+		_query "SELECT idPath,strPath FROM path WHERE idParentPath=$idPath" | while IFS='|' read idp pn ; do
+			_remappath $idp "$lpf$(basename "$(_kodi2local "$pn")")"
+		done
+		# ditch idPath
+		_query "UPDATE path SET strContent='',strScraper='' WHERE idPath=$idPath" # clear specs so path can be cleaned up. could use _deletepath -f but when the scraper is cleared and children gone, there should be no problem deleting it
+		_deletepath -g $idPath
+	fi
+}
+
+# COMMAND-LINE OPTIONS
+
+if (( $# >=2 )) && [[ $1 == -db || $1 == --database ]] ; then
+	vdb=$2 ; shift 2 # swallow -db dbfile, which also means this is not logged in cmdlog (not necessary as cmdlog is saved alongside the database that cmds were run on)
+	if [[ ! -f $vdb ]] ; then echo "ERROR: database file $vdb not found" >&2 ; exit 1 ; fi
+	if [[ $cmdlog != */* ]] ; then cmdlog="$(dirname "$vdb")/$cmdlog" ; fi # save cmdlog next to used db file or in the directory specified in cmdlog variable
+	if [[ $localindex != */* ]] ; then localindex="$(dirname "$vdb")/$localindex" ; fi # save localindex next to used db file or in the directory specified in localindex variable
+	# fall through
+fi
+
+# save cmds in log for the following cmds (note: "$@" starts with the first option, without the '-db file':
+for opt in "-df " "--delete-file " "-dp " "--delete-path " "-rf " "--remap-file " "-rp " "--remap-path " "-fp " "--fix-paths " "-mw[= ]" "--mark-watched[= ]" ; do
+	if [[ "$@" == $opt* ]] ; then 
+	{	# save cmd in log for replay ; add a timestamp to tell sessions apart and prevent confusion
+		echo -e -n "$(date +%Y%m%d_%H%M%S)\t$0"
+		for i in "$@" ; do
+			if [[ ! ( $i == -* || $i =~ ^[0-9]*$ ) ]] ; then # print all argument as quoted strings, except -options and numbers
+				i=${i//\"/\\\"}
+				echo -n " \"$i\""
+			else
+				echo -n " $i"
+			fi
+		done
+		echo
+	} >> "$cmdlog"
+	break
+	fi
+done
+
+if (( $# >= 2 )) && [[ $1 == -df || $1 == --delete-file ]] ; then # delete file(s) from database by ID or localpath
+	shift # swallow -df
+	force= ; if (( $# >=1 )) && [[ $1 == -f ]] ; then force=-f ; shift ; fi # swallow -f
+	debug= ; if (( $# >=1 )) && [[ $1 == -g ]] ; then debug=-g ; shift ; fi # swallow -g
+	for f in "$@" ; do
+		idFile=$(_getfileid "$f")
+		if [[ -z $idFile ]] ; then echo "$f: not found in database" >&2 ; continue ; fi
+		echo "deleting file $idFile" >&2
+		_deletefile $force $debug $idFile
+	done
+	exit 0
+fi
+
+if (( $# >= 2 )) && [[ $1 == -dp || $1 == --delete-path ]] ; then # clean out paths(s) and their subpaths, if any, from database by ID, insofar they are not in use as scrape or to hold files
+	shift # swallow -dp
+	force= ; if (( $# >=1 )) && [[ $1 == -f ]] ; then force=-f ; shift ; fi # swallow -f
+	debug= ; if (( $# >=1 )) && [[ $1 == -g ]] ; then debug=-g ; shift ; fi # swallow -g
+	for f in "$@" ; do
+		idPath=$(_getpathid "$f")
+		if [[ -z $idPath ]] ; then echo "$f: not found in database" >&2 ; continue ; fi
+		if [[ -n $force ]] ; then echo "deleting path $idPath" >&2 ; else echo "cleaning path $idPath" >&2 ; fi
+		_deletepath $force $debug $idPath ; done
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == -fp || $1 == --fix-paths ]] ; then
+	echo "scanning and fixing directory structure in database"
+	for p in $(_query "SELECT idPath FROM path") ; do # cache list of ids to prevent nested queries (database locked error)
+		dirPath=$(_query "SELECT strPath FROM path WHERE idPath=$p")
+		if [[ -n $dirPath ]] ; then # need to check this because $p may have been deleted as a duplicate
+			# cleanup duplicates (normally, that doesn't happen)
+			for dup in $(_query "SELECT idPath FROM path WHERE strPath='$(_sqlescape "$dirPath")' AND idPath<>$p") ; do
+				echo "INFO: squashing duplicate path $dup into path $p ($dirPath)" >&2
+				_query "UPDATE path SET idParentPath=$p WHERE idParentPath=$dup"
+				_query "UPDATE files SET idPath=$p WHERE idPath=$dup"
+				# > here also could update: tvshowlinkpath.idPath, tvshowlinkpath_minview.idPath
+				_query "DELETE FROM path WHERE idPath=$dup"
+			done
+			idPath=$(_createpath -g "$(_kodi2local "$dirPath")")
+		fi
+	done
+	"$0" -db "$vdb" -c # postfix consistency check
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == -c || $1 == --check ]] ; then
+	echo "performing consistency check on database"
+	# some consistency checks
+	#  list paths that violate the directory structure (shouldn't happen after fix)
+	_query "SELECT p.idPath,p.strPath,q.idPath,q.strPath FROM path p, path q WHERE q.idPath=p.idParentPath" | while IFS='|' read a b c d ; do
+		if [[ "$d" != "$(dirname "$b")/" ]] ; then echo "ERROR: path $a=$b is not the parent of path $c=$d" >&2 ; fi
+	done
+	#  list paths that have no parent path (the root directory is excluded from this list as it is supposed not to have a parent) (shouldn't happen after fix)
+	_query "SELECT idPath,strPath FROM path WHERE IFNULL(idParentPath,'')='' AND strPath<>'$(_sqlescape "$kodiroot")'" |  while IFS='|' read a b ; do
+		echo "WARNING: path $a=$b has no parent path record" >&2
+	done
+	#  list files that have no name (yes, this does happen...)
+	_query "SELECT f.idFile,p.strPath FROM files f JOIN path p ON p.idPath=f.idPath WHERE f.strFilename=''" | while IFS='|' read a b ; do
+		echo "ERROR: file $a=$b has no file name" >&2
+	done
+	exit 0
+fi
+
+if (( $# == 3 )) && [[ $1 == -rf || $1 == --remap-file ]] ; then # remap file, specified by idFile or localpath, so it points to specified file
+	echo "remapping file $2 to point to $3"
+	if ! idFile=$(_getfileid "$2") ; then exit 1 ; fi
+	if [[ -z $idFile ]] ; then echo "$2: not found in database" >&2 ; exit 1 ; fi
+	if [[ -f $3 ]] ; then _remapfile $idFile "$3" ; else echo "ERROR: not found: $3" >&2 ; fi
+	exit 0
+fi
+
+if (( $# == 3 )) && [[ $1 == -rp || $1 == --remap-path ]] ; then # remap path, specified by idPath or localpath, so it points to specified path
+	echo "remapping path $2 to point to $3"
+	if ! idPath=$(_getpathid "$2") ; then exit 1 ; fi
+	if [[ -z $idPath ]] ; then echo "$2: not found in database" >&2 ; exit 1 ; fi
+	if [[ -d $3 ]] ; then _remappath $idPath "$3" ; else echo "ERROR: not found: $3" >&2 ; fi
+	exit 0
+fi
+
+if (( $# >= 2 )) && [[ $1 == -mw* || $1 == --mark-watched* ]] ; then # bump the watched state on the file, create file first if it does not exist
+	n= ; if [[ $1 =~ ^.*=[0-9]*$ ]] ; then n=${1#*=} ; fi # get the playcount to set to, if specified on the cmdline
+	shift # swallow -mw[=<num>]
+	for f in "$@" ; do
+		if ! idFile=$(_getfileid "$f") ; then continue ; fi # error msg has been printed from within _getfileid - continue with the other files
+		if [[ -z $idFile ]] ; then idFile=$(_createfile -g "$f") ; fi
+		if [[ -n $idFile ]] ; then
+			if [[ -z $n ]] ; then
+				echo "INFO: bumping watched state on file $idFile=$f" >&2
+				_query "UPDATE files SET playCount=$(( $(_query "SELECT IFNULL(playCount,0) FROM files WHERE idFile=$idFile")+1 )) WHERE idFile=$idFile"
+			elif (( n == 0 )) ; then
+				echo "INFO: clearing watched state on file $idFile=$f" >&2
+				_query "UPDATE files SET playCount='' WHERE idFile=$idFile"
+			else
+				echo "INFO: setting watched state on file $idFile=$f to $n" >&2
+				_query "UPDATE files SET playCount='$n' WHERE idFile=$idFile"
+			fi
+		else
+			echo "ERROR: not found: $f" >&2
+		fi
+	done
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == -l || $1 == --list ]] ; then
+
+#false &&
+{
+	echo "scanning paths" >&2
+	_query "SELECT idPath,strPath,strContent,strScraper,idParentPath FROM path" | while IFS='|' read p dirPath content scraper parent ; do
+		d=$(_kodi2local "$dirPath")
+		if [[ -n $content ]] ; then
+			echo -e "$p_content:\t$p\t$d\thas content '$content' and scraper '$scraper'"
+		fi
+		if [[ -z $parent && $d != "$localroot" ]] ; then
+			echo -e -n "$p_noparent:\t$p\t$d\thas no parent path id" && [[ $d == "$localroot"* ]] && echo -n " (can be fixed with -fp (--fix-paths))" ; echo
+		fi
+		if [[ -d $d ]] ; then # d is a (link to) and existing directory
+			echo -e "$p_found:\t$p\t$d"
+		else
+			echo -e "$p_notfound:\t$p\t$d"
+		fi
+	done
+	#  list records that are not used to hold subpaths, files or scraper info
+	_query "SELECT p.idPath,p.strPath FROM path p LEFT JOIN path q ON q.idParentPath=p.idPath LEFT JOIN files f ON f.idPath=p.idPath WHERE IFNULL(p.strContent,'')='' AND IFNULL(p.strScraper,'')='' AND IFNULL(q.idPath,'')='' AND IFNULL(f.idFile,'')=''" | while IFS='|' read a b ; do
+		echo -e "$p_unref:\t$a\t$(_kodi2local "$b")\tis a standalone (unreferenced) path and can be cleaned out"
+	done
+	# report the idPath of $kodiroot
+	echo -e "$p_root:\t$(_query "SELECT idPath FROM path WHERE strPath='$(_sqlescape "$kodiroot")'")\t$kodiroot"
+}
+
+#false &&
+{
+	echo "scanning files" >&2
+	_query "SELECT f.idFile,f.idPath,p.strPath,f.strFilename,m.idMovie,m.c00,IFNULL(f.playCount,0),b.idFile
+			FROM files f
+			JOIN path p ON f.idPath=p.idPath
+			LEFT JOIN movie m ON m.idFile=f.idFile
+			LEFT JOIN bookmark b ON b.idFile=f.idFile" | while IFS='|' read idFile idPath dirPath fileName idMovie title playCount bookMark ; do
+		lpf=$(_kodi2local "$dirPath$fileName")
+		# check if the file is not used by a movie
+		if [[ -n $idMovie ]] ; then
+			echo -e "$f_movie:\t$idFile\t$lpf\tis used by movie $idMovie ($title) and should not be deleted"
+			continue
+		fi
+		# > here one would insert code to check if the file is not used by a musicvideo, episode, tvshow, etc.
+		if [[ -n $bookMark ]] ; then
+			echo -e "$f_bookmark:\t$idFile\t$lpf\thas a bookmark (i.e. in progress)"
+			continue
+		fi
+		if [[ $playCount != 0 ]] ; then
+			echo -e "$f_playcount:\t$idFile\t$lpf\thas a playcount $playCount (i.e. watched)"
+			continue
+		fi
+		# finally, we're ready to repert that the files record and all related records can be deleted (with -df)
+		echo -e "$f_unref:\t$idFile\t$lpf\tis a standalone (unreferenced) file and can be deleted"
+	done
+}
+
+#false &&
+{
+	if [[ ! -f $localindex ]] ; then
+		_createlocalindex "$localindex" # the below code needs the $localindex to check the database against what's found on disk
+	fi
+
+	echo "locating missing files" >&2
+	_query "SELECT f.idFile,p.strPath,f.strFilename FROM files f JOIN path p ON f.idPath=p.idPath" | while IFS='|' read idFile p f ; do
+		lpf=$(_kodi2local "$p$f")
+		if [[ ! -f $lpf ]] ; then # file is no longer exactly in the same place where it was
+			# try to find the file in the index - we'll try several things:
+			fn=$(basename "$lpf")                      # the full file filename
+			fx=$(sed -e "s/\.[a-z0-9.]*$//" <<< "$fn") # the file name without (multiple) extensions
+			fd=$(basename "$(dirname "$lpf")")         # the directory in which fn was located
+			found=$(grep -F "/$fd/$fn" "$localindex" | cut -f 4)
+			if [[ -n $found ]] && (( $(wc -l <<< "$found") == 1 )) ; then # just list the 1 found; if there are more, they'll appear in the f_dup section
+				echo -e "$f_foundone:\t$idFile\t$lpf\t$found"
+				continue
+			fi
+			found=$(grep -F "/$fd/$fx." "$localindex" | cut -f 4) # find the same dir/file but possibly with a different extension
+			if [[ -n $found ]] && (( $(wc -l <<< "$found") == 1 )) ; then # just list the 1 found; if there are more, they'll appear in the f_dup section
+				echo -e "$f_foundlike:\t$idFile\t$lpf\t$found"
+				continue
+			fi
+			found=$(grep -F "/$fx." "$localindex" | cut -f 4)
+			if (( $(wc -l <<< "$found") > 1 )) ; then
+				echo -e "$f_founddup:\t$idFile\t$lpf\t$(tr '\n' '\t' <<< "$found")"
+				continue
+			elif [[ -n $found ]] ; then # exactly 1 match (only path and/or extension is different)
+				echo -e "$f_foundlike:\t$idFile\t$lpf\t$found"
+				continue
+			fi
+			echo -e "$f_notfound:\t$idFile\t$lpf"
+		fi
+	done
+}
+
+	exit 0
+fi
+
+# UTILITIES
+
+if (( $# == 1 )) && [[ $1 == --summary ]] ; then
+	# read log from stdin and print summary
+	tmp=$(mktemp) ; cat > $tmp
+	cut -f 1 $tmp | sort | uniq | while read f ; do echo -n "$f " ; grep "^$f" $tmp | wc -l ; done
+	rm $tmp
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == --delete-unref ]] ; then
+	if true ; then
+		# read log from stdin and delete unreferenced file records by id
+		grep "^$f_unref" | cut -f 2 | xargs "$0" -db "$vdb" -df # use xargs because it can be a really long list of ids
+	else
+		# this query selects the same candidates:
+		#   "select * from files f left join movie m on m.idFile=f.idFile left join bookmark b on b.idFile=f.idfile where ifnull(f.playCount,'')='' and ifnull(m.idMovie,'')='' and ifnull(b.idFile,'')=''"
+		# and to cleanup these files and referenced records (incl. streamdetails and settings):
+		#   "delete files,bookmark,settings,streamdetails from files f left join movie m on m.idFile=f.idFile left join bookmark b on b.idFile=f.idfile left join settings se on se.idFile=f.idFile left join streamdetails st on st.idFile=f.idFile where ifnull(f.playCount,'')='' and ifnull(m.idMovie,'')='' and ifnull(b.idFile,'')=''"
+		# however, sqlite does not support the delete ... left join ... combination, nor delete from multiple tables in a single statement, so:
+		subquery_select_idFile="SELECT f.idFile FROM files f LEFT JOIN movie m ON m.idFile=f.idFile LEFT JOIN bookmark b ON b.idFile=f.idFile WHERE IFNULL(f.playCount,'')='' and IFNULL(m.idMovie,'')='' and IFNULL(b.idFile,'')=''"
+		_query "DELETE FROM bookmark WHERE idFile IN ($subquery_select_idFile)"
+		_query "DELETE FROM settings WHERE idFile IN ($subquery_select_idFile)"
+		_query "DELETE FROM streamdetails WHERE idFile IN ($subquery_select_idFile)"
+		_query "DELETE FROM files WHERE idFile IN ($subquery_select_idFile)"
+		# but, in fact, this isn't any faster
+	fi
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == --clean-root ]] ; then
+	# read log from stdin and clean root path found in stdin
+	"$0" -db "$vdb" -dp "$localroot"
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == --remap-foundone ]] ; then
+	# read log from stdin, filter on foundone and remap files
+	grep "^$f_foundone" | cut -f 2,4 | while read a b ; do "$0" -db "$vdb" -rf $a "$b" ; done
+	exit 0
+fi
+
+if (( $# == 1 )) && [[ $1 == --remap-foundlike ]] ; then
+	# read log from stdin, filter and remap files
+	grep "^$f_foundlike" | cut -f 2,4 | while read a b ; do "$0" -db "$vdb" -rf $a "$b" ; done
+	exit 0
+fi
+
+if (( $# >= 1 )) && [[ $1 == --list-founddup ]] ; then
+	shift ; pick= ; if (( $# == 1 )) && [[ $1 == --pick ]] ; then pick=y ; shift ; fi
+	# read log from stdin, filter, prompt for, and rename files
+	grep "^$f_founddup" | sort -k 3 |  while IFS=$'\t' read a b c d ; do # d holds the tab-separated list of duplicates
+		echo -e "$a\t$b\t$c"
+		mapfile -d $'\t' -t dups < <(tr -d '\n' <<< "$d") # remove the newline at end of d that mapfile would keep in the last element of dups
+		m=1 ; for f in "${dups[@]}" ; do echo "  #$m: $f" ; ((m++)) ; done
+		if [[ -n $pick ]] ; then # also pick
+			read -p "      $c => #? " n </dev/tty # pick a number
+			if [[ -n $n ]] && (( n > 0 && n < m )) ; then
+				m=1 ; for f in "${dups[@]}" ; do if (( m == n )) ; then "$0" -db "$vdb" -rf "$c" "$f" ; break ; fi ; ((m++)) ; done # use localpath $c instead of file id $b to create a portable entry in the history log
+			fi
+		fi
+	done
+	exit 0
+fi
+
+if (( $# >= 1 )) && [[ $1 == --list-notfound ]] ; then
+	shift ; pick= ; if (( $# == 1 )) && [[ $1 == --pick ]] ; then pick=y ; shift ; fi
+	# read log from stdin, filter and pick files
+	grep "^$f_notfound" | sort -k 3 | while read a b c ; do
+		echo -e -n "$a\t$b\t$c"
+		if [[ -n $pick ]] ; then # also pick
+			read -p " => ? " n </dev/tty # pick a file path
+			m=$(mac2syn <<< "$n")
+			if [[ -f $n ]] ; then # a localpath was specified: remap file
+				"$0" -db "$vdb" -rf "$c" "$n" # use localpath $c instead of file id $b to create a portable entry in the history log
+			elif [[ -f $m ]] ; then # a mac os-encoded utf-8 localpath was specified: remap file
+				"$0" -db "$vdb" -rf "$c" "$m" # use localpath $c instead of file id $b to create a portable entry in the history log
+			elif [[ $n = d ]] ; then # d=delete file
+				"$0" -db "$vdb" -df -f -g "$c"
+			fi
+		else
+			echo
+		fi
+	done
+	exit 0
+fi
+
+if (( $# == 3 )) && [[ $1 == --rename-founddup ]] ; then
+	# read log from stdin, filter and rename files
+	grep "^$f_founddup" | grep -F "$2" | cut -f 2,3 | while read a b ; do "$0" -db "$vdb" -rf $a "$(perl -pe "s(\Q$2\E)($3)" <<< "$b")" ; done
+	exit 0
+fi
+
+if (( $# == 3 )) && [[ $1 == --rename-notfound ]] ; then
+	# read log from stdin, filter and rename files
+	grep "^$f_notfound" | grep -F "$2" | cut -f 2,3 | while read a b ; do "$0" -db "$vdb" -rf $a "$(perl -pe "s(\Q$2\E)($3)" <<< "$b")" ; done
+	exit 0
+fi
+
+# UNDOCUMENTED FEATURES
+
+if (( $# == 2 )) && [[ $1 == -u ]] ; then # urlencode
+	_urlencode_kodi "$2" # kodidb_check -u <url> is a utility command to check the urlencode function
+	exit 0
+fi
+
+if (( $# == 2 )) && [[ $1 == -lf ]] ; then # list file
+	_kodi2local "$(_query "SELECT p.strPath,f.strFilename FROM files f JOIN path p ON p.idPath=f.idPath WHERE idFile=$(_getfileid "$2")" | tr -d '|')"
+	exit 0
+fi
+
+if (( $# == 2 )) && [[ $1 == -ff ]] ; then # find file
+	if ! _getfileid "$2" ; then exit 1 ; fi
+	exit 0
+fi
+
+if (( $# == 2 )) && [[ $1 == -pp ]] ; then # find path
+	if ! _getpathid "$2" ; then exit 1 ; fi
+	exit 0
+fi
+
+# once here, none of the valid commands were discovered from the options & arguments: print usage
+_usage
+
+#EOF
