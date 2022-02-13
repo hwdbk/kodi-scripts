@@ -1,4 +1,4 @@
-# Kodi database management (Myvideos.db)
+# Kodi database management (MyVideos.db)
 
 Utility to check, clean up and manage the kodi media player database (MyVideos119.db)
 
