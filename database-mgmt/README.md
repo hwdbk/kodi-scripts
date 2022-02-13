@@ -2,7 +2,8 @@
 
 Utility to check, clean up and manage the kodi media player database (MyVideos119.db)
 
-`usage: kodidb_check [options] [args]
+```
+usage: kodidb_check [options] [args]
         [-db, --database file]                   use file as database instead of the default MyVideos119.db, followed by one of the functions below:
          -l,  --list                             will scan the data base and lists output that can be filtered with grep. idFile or idPath is in the 2nd column. does not modify the database
          -c,  --check                            will scan the data base and lists inconsistencies. does not modify the database
@@ -28,5 +29,5 @@ constraints: movies are not touched (these can be cleaned up with 'Clean Library
 limitations: does not scan or check for musicvideos, episodes, tvshows
              tested on version 119 of MyVideos.db (Kodi 19)
              tested on linux-gnu and darwin21 (Mac OS X will require bash >=4 (for mapfile), which can be obtained from MacPorts or Brew)
-`
+```
 
