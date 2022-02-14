@@ -24,6 +24,8 @@ Definitions:
 - Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted around 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
 
 ```
+$ kodidb_check -l > dblist.lst
+$ kodidb_check --summary < dblist.lst
 f_founddup______: 97
 f_foundlike_____: 10587
 f_foundone______: 2769
