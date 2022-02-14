@@ -130,12 +130,12 @@ usage: kodidb_check_replay source_MyVideos119.db (original/soure database to run
 ```
 
 ## Example
-- On the "kodi" system: retrieve the MyVideos119.db database from the kodi box (in `.kodi/userdata/Databases`)
+- On the "kodi" system: retrieve the MyVideos119.db database from the kodi box (from `.kodi/userdata/Databases`)
 - Place the MyVideos119.db file on the "local" system and call it MyVideos119.db.org (that's your backup)
 - On the "local" machine
   - Make sure the local machine has access to your media library filesystem
   - configure the `localroot` and `localsources` accordingly
-  - configure the `kodiroot` directory to the root path that is used on the kodi machine. Look in sources.xml for the path or run `sqlite3 MyVideos119.db.org <<< "SELECT c22 FROM movie"` to see how the path is constructed and relates to the local file system.
+  - configure the `kodiroot` directory to the root path that is used on the kodi machine. Look in `.kodi/userdata/sources.xml` on the kodi system for the path or run `sqlite3 MyVideos119.db.org <<< "SELECT c22 FROM movie"` on the local system to see how the kodi path is constructed and how it relates to the local file system.
 - Run `kodidb_check -l` to check if the output makes sense.
 - Run `kodidb_check_replay MyVideos119.db.org` to create the sequence.
 - Check for errors in the stdout.log and stderr.log files in the output directories (grep -r ERROR does wonders).
