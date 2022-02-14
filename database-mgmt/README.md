@@ -9,25 +9,25 @@ There are many 'howtos' around on managing file and directory paths in a MyVideo
 `kodidb_check` is a utility to check, clean up and manage the kodi media player database (MyVideos119.db)
 
 This script provides a number of options to check, fix and clean up a Kodi MyVideos database. It can, among others:
-- remap a path or a file, and make sure all referenced files are updated properly
-- rename a file, path, or part of a path and make sure all referenced files are updated properly
+- remap a path or a file, and make sure all referenced files are updated properly and related records are dragged along accordingly
+- rename a file, path, or part of a path and make sure the database is updated properly
 - do a consistency check on the directory structure as registered in the database, and fix it
 - list duplicate files found in the database, and optionally provide a prompt to fix the ambiguity
 - list files from the database that can no longer be found (located) on the local file system, and optionally provide a prompt to fix the missing items
-- save all database-modifying operations in a log file (`history.log`), so you can review them or for record-keeping. The commands are printed in a bash-ready form so you and even extract them for replay or save them in a script (you need to run `cut -f 2 history.log` to strip the dates).
+- save all database-modifying operations in a log file (`history.log`), so you can review them or keep them for record-keeping. The commands are printed in a bash run-ready form so you can even extract them for replay or save them in a script (you need to run `cut -f 2 history.log` to strip the dates).
 
 Definitions:
-  - "kodi" is referred to as the machine you run kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX.
-  - "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays.
-- The script works off the concept of (media) files. The files have a path (directory) where they are stored. Files can be '*in use*' and therefore important to you and for the script to manage. *In use* means:
-  - The file is (used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
+  - "kodi" is referred to as the machine you run Kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX.
+  - "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays. I haven't tested any of this with Windows.
+- The script works off the concept of (media) files. The files have name and a path (directory) where they are stored. Files can be '*in use*' and therefore important to you and for the script to manage. *In use* means:
+  - The file is (i.e. is used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
   - The file was played (has a play count > 0)
-  - The file playback was in progress (this is called a 'bookmark')
-- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi. The bookmark is important to allow you to resume viewing where you left off last time.
-- Files that are *not* in use don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted around 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
+  - The file playback was in progress (this is called a 'bookmark' and allows you to resume playback of the file where you left off)
+- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi. You can see what you've watched (or more importantly, what you've not watched yet, or which files are 'in progress' of watching: the bookmark is important to allow you to resume viewing where you left off last time.
+- Files that are *not* in use don't need to be kept in the database. Why would you? Over the last 7 years that I've used Kodi, the database contracted around 35k files (and paths) that were just traversed or scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or became used by a movie - these can all be cleaned out - no harm done. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
 
 ```
-$ kodidb_check -l > dblist.lst
+$ kodidb_check --list > dblist.lst
 $ kodidb_check --summary < dblist.lst
 f_founddup______: 97
 f_foundlike_____: 10587
@@ -44,7 +44,6 @@ p_notfound______: 540
 p_root__________: 1
 p_unref_________: 1
 ```
-
 to
 ```
 f_hasbookmark___: 867
