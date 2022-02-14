@@ -14,29 +14,63 @@ This script provides a number of options to check, fix and clean up a Kodi MyVid
 - list files from the database that can no longer be found (located) on the local file system, and optionally provide a prompt to fix the missing items
 - save all database-modifying operations in a log file (`history.log`), so you can review them or for record-keeping. The commands are printed in a bash-ready form so you and even extract them for replay or save them in a script (you need to run `cut -f 2 history.log` to strip the dates).
 
-IMPORTANT:
-- Definitions:
- - "kodi" is referred to as the machine you run kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX.
- - "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays.
+Definitions:
+  - "kodi" is referred to as the machine you run kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX.
+  - "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays.
 - The script works off the concept of (media) files. The files have a path (directory) where they are stored. Files can be '*in use*' and therefore important to you and for the script to manage. *In use* means:
- - The file is (used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
- - The file was played (has a play count > 0)
- - The file playback was in progress (this is called a 'bookmark')
-- Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted over 35k files that were just scanned, moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out.
+  - The file is (used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
+  - The file was played (has a play count > 0)
+  - The file playback was in progress (this is called a 'bookmark')
+- Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted over 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. The script got me from:
+
+```
+f_founddup______: 97
+f_foundlike_____: 10587
+f_foundone______: 2769
+f_hasbookmark___: 1289
+f_hasmovie______: 1031
+f_hasplaycount__: 3317
+f_isunref_______: 34945
+f_notfound______: 13229
+p_content_______: 1
+p_found_________: 313
+p_noparent______: 595
+p_notfound______: 540
+p_root__________: 1
+p_unref_________: 1
+```
+
+to
+```
+f_hasbookmark___: 867
+f_hasmovie______: 1031
+f_hasplaycount__: 2331
+p_content_______: 1
+p_found_________: 563
+p_noparent______: 5
+p_notfound______: 5
+p_root__________: 1
+p_unref_________: 5
+```
+
 - Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi.
+
+IMPORTANT:
 - Set up the `localroot` and `kodiroot` first in the script: they should point to the highest order directory that the kodi box shares
 with the local machine. The idea is that kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. localroot and kodiroot bring these together, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the two variables `localroot` and `kodiroot`.
 - The script does not touch (write/modify) your filesystem. It does read the file system to find files and check if (media) files and directories are there. This is to make sure the database, once put back on the kodi box, still works. If you're paranoid, you can mount the file system r/o and see that the script still works.
 - I have no idea how the tool works if you have several removable disks with media; in theory, you could run the script several times and set up the `localroot` for each removable disk, and run the script.
-- The script *does* modify the MyVideos119.db database. Always make a backup copy before attempting a cleanup. Hint: call the backup copy something different, like MyVideos119.db.org, so it can not accidentally be used by `kodidb_check`.
+- The script *does* modify the MyVideos119.db database. Always make a backup copy before attempting a cleanup. Hint: call the backup copy something different, like MyVideos119.db.org, so it can not accidentally be used by `kodidb_check`. Use the `kodi_check_replay` script to explicitly store and work on separate phases of the cleanup, with multiple backup points to retrace your steps.
 
 Constraints:
 - Movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
-- Does not scan or check for musicvideos, episodes, tvshows. That's because I don't use these types of media. If you use these, they do not classify the scanned files as 'in use' and the files may be cleaned up. If you despereately need this feature, drop me a line.
+- Does not scan or check for musicvideos, episodes, tvshows, sorry... That's because I don't use these types of media. If you use these, they do not classify the scanned files as '*in use*' and the files may be cleaned up. If you despereately need this feature, drop me a line.
 - The script works off the MyVideos database, not NFO files that may be stored alongside the media.
+
 Limitations:
 - The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \). I have no clue what a database looks like on a Windows kodi box.
 - The 'local' system: tested on linux-gnu and darwin21 
+
 Dependencies:
 - The script uses sqlite3, which is the format of the kodi databases.
 - The script relies on bash >=4 (for the mapfile builtin function). MacOSX 'local' machines may need to install this from MacPorts or Brew.
@@ -65,4 +99,5 @@ usage: kodidb_check [options] [args]
               --rename-founddup oldstr newstr    remap files with duplicate matches after substituting oldstr with newstr in the full path
               --rename-notfound oldstr newstr    remap files which weren't found after substituting oldstr with newstr in the full path
 ```
+
 
