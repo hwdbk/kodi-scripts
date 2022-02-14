@@ -4,7 +4,7 @@ Kodi is a great media player. It is even great at finding metadata around movies
 
 There are many 'howtos' around on managing file and directory paths in a MyVideos119.db. None of these (including the https://kodi.wiki/view/HOW-TO:Update_SQL_databases_when_files_move or https://kodi.wiki/view/HOW-TO:Update_Paths_In_MySQL) work(ed) very well for various reasons. Catching all variations and multiple occurrences of file paths, different kodi path notation, URL-encoded- and XML-escaped- (if you use the XML export) and UTF-8 strings (like Antonín Dvořák), then at the same time make sure the database remains consistent is not trivial and can't be caught in a simple 'search-replace' or a couple of SQL queries - that's why I started writing this tool, in need for some granular control over the process and being able what happend, what I screwed up and retrace my steps in the next run.
 
-##kodidb_check
+## kodidb_check
 
 `kodidb_check` is a utility to check, clean up and manage the kodi media player database (MyVideos119.db)
 
