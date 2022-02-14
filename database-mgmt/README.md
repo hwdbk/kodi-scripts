@@ -21,7 +21,7 @@ Definitions:
   - The file is (used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
   - The file was played (has a play count > 0)
   - The file playback was in progress (this is called a 'bookmark')
-- Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted over 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. The script got me from:
+- Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted around 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
 
 ```
 f_founddup______: 97
