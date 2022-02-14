@@ -4,24 +4,25 @@
 # some ideas:
 
 # remap (rename) a path because it was moved on disk (example)
-kodidb_ckeck -rp "/mnt/media/oldpath/" "/mnt/media/newpath"
+#kodidb_ckeck -rp "/mnt/media/oldpath/" "/mnt/media/newpath"
 
 # delete all files that have an empty filename (yes, this happens!)
-kodidb_check -df -f $(sqlite3 MyVideos119.db <<< "select idfile from files where strFilename=''")
+#kodidb_check -df -f $(sqlite3 MyVideos119.db <<< "select idfile from files where strFilename=''")
+
 # delete all files that have a .MOV extension (in capitals, that is) (example)
 #kodidb_check -df -f $(sqlite3 MyVideos119.db <<< "select idfile,strFilename from files where strFilename like '%.MOV'" | grep "\.MOV$" | cut -f 1 -d '|') # SQL 'LIKE' QUERIES ARE CASE-INSENSITIVE !!!
 
 # resolve duplicates from --list-founddup --pick, then imported from history.log so you can replay them here (example)
-kodidb_check -rf "/mnt/media/oldlocation/file.ext" "/mnt/media/newlocation/newfile.ext"
+#kodidb_check -rf "/mnt/media/oldlocation/file.ext" "/mnt/media/newlocation/newfile.ext"
 
 # resolve duplicates from --list-notfound --pick, then imported from history.log so you can replay them here (example)
-kodidb_check -rf "/mnt/media/oldlocation/anotherfile.ext" "/mnt/media/newlocation/anothernewfile.ext"
+#kodidb_check -rf "/mnt/media/oldlocation/anotherfile.ext" "/mnt/media/newlocation/anothernewfile.ext"
 
 # clean out old watched directories (example)
-kodidb_check -dp -f "/mnt/media/series/Friends/"
+#kodidb_check -dp -f "/mnt/media/series/Friends/"
 
 # manually update watched state (example)
-kodidb_check -mw=2 /mnt/media/series/GoT/*.mp4
+#kodidb_check -mw=2 /mnt/media/series/GoT/*.mp4
 
 # finally, cleanup and check
 kodidb_check --clean-root
