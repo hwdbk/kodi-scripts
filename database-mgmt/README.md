@@ -104,7 +104,7 @@ usage: kodidb_check [options] [args]
               --rename-notfound oldstr newstr    remap files which weren't found after substituting oldstr with newstr in the full path
 ```
 
-`kodidb_check_replay`: utility to run a recipe of `kodidb_check` commands, and store each intermediate result in a subdirectory
+## kodidb_check_replay
 
 The `kodidb_check_replay` runs a sequence of `kodidb_check` commands, typically a cleanup and check recipe, and stores each result in a subdirectory. The script is configured to run:
 
@@ -125,7 +125,7 @@ usage: kodidb_check_replay source_MyVideos119.db (original/soure database to run
        kodidb_check_replay n (stage number to resume the replay on, overwriting results of n, n+1 etc. uses the database from stage n-1)
 ```
 
-Example:
+## Example
 - On the "kodi" system: retrieve the MyVideos119.db database from the kodi box (in `.kodi/userdata/Databases`)
 - Place the MyVideos119.db file on the "local" system and call it MyVideos119.db.org (that's your backup)
 - On the "local" machine
