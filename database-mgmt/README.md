@@ -21,7 +21,8 @@ Definitions:
   - The file is (used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
   - The file was played (has a play count > 0)
   - The file playback was in progress (this is called a 'bookmark')
-- Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted around 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
+- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi. The bookmark is important to allow you to resume viewing where you left off last time.
+- Files that are *not* in use don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted around 35k files (and paths) that were just scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
 
 ```
 $ kodidb_check -l > dblist.lst
@@ -54,8 +55,6 @@ p_notfound______: 5
 p_root__________: 1
 p_unref_________: 5
 ```
-
-- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi.
 
 IMPORTANT:
 - Set up the `localroot` and `kodiroot` first in the script: they should point to the highest order directory that the kodi box shares
