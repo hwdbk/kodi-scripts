@@ -1,0 +1,60 @@
+#!/bin/bash
+# kodidb_check_replay - tool to prototype various stages of kodidb repair, and allow resume from a certain stage
+
+_usage() {
+	echo "usage: $(basename "$0") source_$vdb (original/soure database to run the replay on)" >&2
+	echo "       $(basename "$0") n (stage number to resume the replay on, overwriting results of n, n+1 etc. uses the database from stage n-1)" >&2
+	echo "configured stages:" >&2
+	for i in "${d[@]}" ; do echo -e "\t$i" >&2 ; done
+}
+
+readonly vdb=MyVideos119.db
+readonly localindex=fileindex.fst
+readonly kodidb_check="$(dirname "$0")"/kodidb_check
+readonly postfix="$(dirname "$0")"/postfix
+
+n=0
+readonly d=(
+"$((n++)) original database"
+"$((n++)) cleaned unreferenced file records (--delete-unref)"
+"$((n++)) fixed paths (--fix-paths)"
+"$((n++)) fixed found files pt 1 (--remap-foundone)"
+"$((n++)) fixed found files pt 2 (--remap-foundlike)"
+"$((n++)) run postfix"
+)
+for i in "${d[@]}" ; do mkdir -p "$i" ; done
+readonly dblistout=dblist.lst
+readonly outstdout=stdout.log
+readonly outstderr=stderr.log
+
+_makeindex() { # n - create a database dump/analysis (kodidb_check -l) on the database in . and store the result and a copy of the used database in dir (n)
+	local n=$1
+	cp ./$vdb "${d[n]}" # copy working database to the output directory
+	$kodidb_check -l >"${d[n]}/$dblistout" # create database dump/list in output directory
+	cp ./$localindex "${d[n]}" # archive a copy of the used files list to the output directory
+	echo "SUMMARY from '${d[n]}/$dblistout'" ; $kodidb_check --summary <"${d[n]}/$dblistout" # print summary
+}
+
+_runcmd() { # n cmd args - run cmd args on the database in . and store the result in dir (n)
+	local n=$1 ; local cmd=$2 ; shift 2
+	echo "processing: $cmd $@, saving result in '${d[n]}'"
+	$cmd "$@" <"${d[n-1]}/$dblistout" >"${d[n]}/$outstdout" 2>"${d[n]}/$outstderr" # execute cmd, read the $dblistout from previous output dir (n-1), write stdout and stderr to current output dir (n)
+	_makeindex $n
+}
+
+if [[ -f $1 ]] ; then # 1st form of cmd: start whole replay with the org database
+	cp -v "$1" ./$vdb ; _makeindex 0 ; m=1 # create stage 0 ; resume at stage 1
+elif [[ $1 == [1-9] && -f "${d[$1-1]}/$vdb" ]] ; then
+	cp -v "${d[$1-1]}/$vdb" . ; m=$1 # resume at stage $1
+else
+	_usage ; exit 1
+fi
+# the working database is in . ; kodidb_check uses the result of the previous step and saves the result in the ${d[n]} subdirectory, after which it is indexed
+n=0
+((n++)) ; if (( n>=m )) ; then _runcmd $n $kodidb_check --delete-unref ; fi
+((n++)) ; if (( n>=m )) ; then _runcmd $n $kodidb_check --fix-paths ; fi
+((n++)) ; if (( n>=m )) ; then _runcmd $n $kodidb_check --remap-foundone ; fi
+((n++)) ; if (( n>=m )) ; then _runcmd $n $kodidb_check --remap-foundlike ; fi
+((n++)) ; if (( n>=m )) ; then _runcmd $n $postfix ; fi
+
+#EOF
