@@ -2,7 +2,7 @@
 
 Kodi is a great media player. It is even great at finding metadata around movies and the like (called scraping) and storing/displaying this data and images in the user interface. What Kodi doesn't do very well (read: doesn't do at all), is keeping track of your media files if you hapen to move these around (and don't we all do that, keeping the library organised?). In Kodi, there's only two things you can do: Clean the Library (which will *delete* all entries that are no longer in the expected location on the disk, even if you just moved or renamed the original media file), and Rescrape (which will re-download all metadata from one of the online sources).
 
-There are many 'howtos' around on managing file and directory paths in a MyVideos119.db. None of these work(ed) very well for various reasons. Catching all variations and multiple occurrences of file paths, different kodi path notation, URL-encoded and XML-escaped strings (if you use the XML export), then at the same time make sure the database remains consistent is not trivial - that's why I started writing this tool, in need for some granular control over the process and being able what happend, what I screwed up and retrace my steps in a second run.
+There are many 'howtos' around on managing file and directory paths in a MyVideos119.db. None of these (including the https://kodi.wiki/view/HOW-TO:Update_SQL_databases_when_files_move or https://kodi.wiki/view/HOW-TO:Update_Paths_In_MySQL) work(ed) very well for various reasons. Catching all variations and multiple occurrences of file paths, different kodi path notation, URL-encoded- and XML-escaped- (if you use the XML export) and UTF-8 strings (like Antonín Dvořák), then at the same time make sure the database remains consistent is not trivial and can't be caught in a simple 'search-replace' or a couple of SQL queries - that's why I started writing this tool, in need for some granular control over the process and being able what happend, what I screwed up and retrace my steps in the next run.
 
 `kodidb_check`: utility to check, clean up and manage the kodi media player database (MyVideos119.db)
 
@@ -16,10 +16,14 @@ This script provides a number of options to check, fix and clean up a Kodi MyVid
 
 IMPORTANT:
 - Definitions:
--- "kodi" is referred to as the machine you run kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX.
--- "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays.
-- The script works with the concept of a file '*in use*' and therefore important to manage. *In use* means
--- 
+ - "kodi" is referred to as the machine you run kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX.
+ - "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays.
+- The script works off the concept of (media) files. The files have a path (directory) where they are stored. Files can be '*in use*' and therefore important to you and for the script to manage. *In use* means:
+ - The file is (used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
+ - The file was played (has a play count > 0)
+ - The file playback was in progress (this is called a 'bookmark')
+- Files that are not *in use* don't need to be kept in the database. Why would you? Over the last 7 years that I've used kodi, the database contracted over 35k files that were just scanned, moved, removed, disappeared, but never played (in full or partial) or used by a movie - these can all be cleaned out.
+- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi.
 - Set up the `localroot` and `kodiroot` first in the script: they should point to the highest order directory that the kodi box shares
 with the local machine. The idea is that kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. localroot and kodiroot bring these together, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the two variables `localroot` and `kodiroot`.
 - The script does not touch (write/modify) your filesystem. It does read the file system to find files and check if (media) files and directories are there. This is to make sure the database, once put back on the kodi box, still works. If you're paranoid, you can mount the file system r/o and see that the script still works.
@@ -29,6 +33,7 @@ with the local machine. The idea is that kodi has a certain view on the file sys
 Constraints:
 - Movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
 - Does not scan or check for musicvideos, episodes, tvshows. That's because I don't use these types of media. If you use these, they do not classify the scanned files as 'in use' and the files may be cleaned up. If you despereately need this feature, drop me a line.
+- The script works off the MyVideos database, not NFO files that may be stored alongside the media.
 Limitations:
 - The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \). I have no clue what a database looks like on a Windows kodi box.
 - The 'local' system: tested on linux-gnu and darwin21 
