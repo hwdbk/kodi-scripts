@@ -1,6 +1,14 @@
-# Kodi database management (MyVideos.db)
+# Kodi database management (MyVideos119.db)
 
 Utility to check, clean up and manage the kodi media player database (MyVideos119.db)
+
+IMPORTANT: set up the localroot and kodiroot first in the script: they should point to the highest order directory that the kodi box shares
+with the local machine.
+constraints: movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
+limitations: does not scan or check for musicvideos, episodes, tvshows
+             tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (has / in the paths, not \)
+             tested on linux-gnu and darwin21 (Mac OS X will require bash >=4 (for mapfile), which can be obtained from MacPorts or Brew)
+
 
 ```
 usage: kodidb_check [options] [args]
@@ -24,10 +32,5 @@ usage: kodidb_check [options] [args]
               --list-notfound [--pick]           list all read 'notfound' files and, with --pick, present a prompt remap the file interactively. use this if you can drop file paths on the prompt
               --rename-founddup oldstr newstr    remap files with duplicate matches after substituting oldstr with newstr in the full path
               --rename-notfound oldstr newstr    remap files which weren't found after substituting oldstr with newstr in the full path
-
-constraints: movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
-limitations: does not scan or check for musicvideos, episodes, tvshows
-             tested on version 119 of MyVideos.db (Kodi 19)
-             tested on linux-gnu and darwin21 (Mac OS X will require bash >=4 (for mapfile), which can be obtained from MacPorts or Brew)
 ```
 
