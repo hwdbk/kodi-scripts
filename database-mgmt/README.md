@@ -59,25 +59,25 @@ p_unref_________: 5
 
 IMPORTANT:
 - Set up the `localroot` and `kodiroot` first in the script: they should point to the highest order directory that the kodi box shares
-with the local machine. The idea is that kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. localroot and kodiroot bring these together, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the two variables `localroot` and `kodiroot`.
-- Secondly, set up the `localsources` variable - these is the list of local path(s) where the media can be found (in the script, `/mnt/media/video/movies /mnt/media/video/incoming` are used as an example, add more or less if necessary). The script will scan these directory trees to crossreference against the database, so this can take a little while. The result is stored in `fileindex.fst`, so only scanned once (delete this file if the `localsources` contents have changed and it will be re-scanned).
-- The script does not touch (write/modify) your filesystem. It does read the file system to find files and check if (media) files and directories are there. This is to make sure the database, once put back on the kodi box, still works. If you're paranoid, you can mount the file system r/o and see that the script still works.
-- I have no idea how the tool works if you have several removable disks with media; in theory, you could run the script several times and set up the `localroot` for each removable disk, and run the script.
-- The script *does* modify the MyVideos119.db database. Always make a backup copy before attempting a cleanup. Hint: call the backup copy something different, like MyVideos119.db.org, so it can not accidentally be used by `kodidb_check`. Use the `kodi_check_replay` script to explicitly store and work on separate phases of the cleanup, with multiple backup points to retrace your steps.
+with the local machine. The idea is that Kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. `localroot` and `kodiroot` bring these together, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the two variables `localroot` and `kodiroot`.
+- Secondly, set up the `localsources` variable - these is the list of local path(s) where the media can be found (in the script, `/mnt/media/video/movies /mnt/media/video/incoming` are used as an example, add more or less if necessary). The script will scan these directory trees, treat them as the master source to crossreference against the database, so the scanning can take a little while. The result is stored in `fileindex.fst`, and only scanned once (delete this file if the `localsources` change or the filesystem contents have changed, and it will be re-scanned).
+- The script does not touch (write/modify) your filesystem. It does read the file system to find files and check if (media) files and directories are there. This is to make sure the database, once put back on the kodi box, still works. If you're paranoid, you can mount the file system r/o and see that the script still works. Some command options don't even access the filesystem or `fileindex.fst` at all and run purely on the database.
+- I have no idea how the tool works if you have several removable disks with media; in theory, you could run a cleanup recipe several times and set up the `localroot` for each removable disk.
+- The script *does* modify the MyVideos119.db database. Always make a (or several) backup copies before attempting a cleanup. Hint: call the backup copy something different, like MyVideos119.db.org, so it can not accidentally be used by `kodidb_check`. Use the `kodi_check_replay` script to explicitly store and work on separate phases of the cleanup, with multiple backup points to retrace your steps.
 
 Constraints:
-- Movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
-- Does not scan or check for musicvideos, episodes, tvshows, sorry... That's because I don't use these types of media. If you use these, they do not classify the scanned files as '*in use*' and the files may be cleaned up. If you despereately need this feature, drop me a line.
-- The script works off the MyVideos database, not NFO files that may be stored alongside the media.
+- Movies are not touched, regardless whether they are watched or not (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
+- Does not scan or check for Music Videos, Episodes, TV Shows, sorry... That's because I don't use these types of media. If you use these, they do not classify the scanned files as '*in use*' and the files may be cleaned up. If you despereately need this feature, drop me a line.
+- The script works off the MyVideos119.db database, not NFO files that may be stored alongside the media.
 
 Limitations:
-- The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \). I have no clue what a database looks like on a Windows kodi box.
+- The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \). I have no clue what a database looks like when Kodi is run as an application on a Windows computer.
 - The 'local' system: tested on linux-gnu and darwin21 
 
 Dependencies:
-- The script uses sqlite3, which is the format of the kodi databases.
-- The script relies on bash >=4 (for the mapfile builtin function). MacOSX 'local' machines may need to install bash and/or sqlite3 from MacPorts or Brew.
-- The script uses mac2syn (https://github.com/hwdbk/synology-scripts/blob/master/mac-nfd-conversion/mac2syn) for converting MacOSX NFD (normalization form decomposed) UTF-8 strings to 'normal' UTF-8. The invocaiton is 'iffed' around an OSTYPE check, so if you're not running MacOSX as a local machine, it should not be a problem.
+- The script uses sqlite3, which is the format of the Kodi databases.
+- The script relies on bash >=4 (for the mapfile builtin function). MacOSX 'local' machines may need to install a newer bash and/or sqlite3 from MacPorts or Brew.
+- The script uses mac2syn (https://github.com/hwdbk/synology-scripts/blob/master/mac-nfd-conversion/mac2syn) for converting MacOSX NFD (normalization form decomposed) UTF-8 strings to 'normal' UTF-8. The invocation is 'iffed' around an OSTYPE check, so if you're not running MacOSX as a local machine, it should not be a problem.
 
 ```
 usage: kodidb_check [options] [args]
