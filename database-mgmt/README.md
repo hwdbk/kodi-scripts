@@ -102,4 +102,46 @@ usage: kodidb_check [options] [args]
               --rename-notfound oldstr newstr    remap files which weren't found after substituting oldstr with newstr in the full path
 ```
 
+`kodidb_check_replay`: utility to run a recipe of `kodidb_check` commands, and store each intermediate result in a subdirectory
 
+The `kodidb_check_replay` runs a sequence of `kodidb_check` commands, typically a cleanup and check recipe, and stores each result in a subdirectory. The script is configured to run:
+
+```
+	0 original database
+	1 cleaned unreferenced file records (--delete-unref)
+	2 fixed paths (--fix-paths)
+	3 fixed found files pt 1 (--remap-foundone)
+	4 fixed found files pt 2 (--remap-foundlike)
+	5 run postfix
+```
+
+The `postfix` script is given as an example to manually enter path and/or file remapping. Add special sqlite3 queries here or commands imported from history.log to tweak the last stage of the fix. It is a good idea to end the process with a `kodidb_check --clean-root`
+and `kodidb_check --check`, to remove any dangling (empty) directories and check the database once more.
+
+```
+usage: kodidb_check_replay source_MyVideos119.db (original/soure database to run the replay on)
+       kodidb_check_replay n (stage number to resume the replay on, overwriting results of n, n+1 etc. uses the database from stage n-1)
+```
+
+Example:
+- On the "kodi" system: retrieve the MyVideos119.db database from the kodi box (in `.kodi/userdata/Databases`)
+- Place the MyVideos119.db file on the "local" system and call it MyVideos119.db.org (that's your backup)
+- On the "local" machine
+  - Make sure the local machine has access to your media library filesystem
+  - configure the `localroot` and `localsources` accordingly
+  - configure the `kodiroot` directory to the root path that is used on the kodi machine. Look in sources.xml for the path or run `sqlite3 MyVideos119.db.org <<< "SELECT c22 FROM movie"` to see how the path is constructed and relates to the local file system.
+- Run `kodidb_check -l` to check if the output makes sense.
+- Run `kodidb_check_replay MyVideos119.db.org` to create the sequence.
+- Check for errors in the stdout.log and stderr.log files in the output directories (grep -r ERROR does wonders).
+- Review the results
+- Adjust the recipe and rerun the recipe from a given stage, e.g. `kodidb_check_replay 3` to rerun everything from the `--remap-foundone` step and onwards.
+- Note: the file system scan (from `localsources`) has an effect on which files are found/not found/duplicate. When this is changed or when the file system has changed structure/contents, delete `fileindex.fst` so it is rescanned next time and rerun from stage 3 to re-evaluate the found files.
+- Tweak and repeat until you're happy with the outcome.
+- On the "kodi" system:
+  - Stop kodi by typing `systemctl stop kodi`
+  - Copy the output MyVideos119.db database to the kodi system (in `.kodi/userdata/Databases`)
+  - Start kodi by typing `systemctl start kodi`
+  - Update the artwork with the great tool from https://github.com/MilhouseVH/texturecache.py by typing `texturecache.py c`
+  - Depending on your use case, clean the video library from the user interface or by typing `texturecache.py vclean`. Or don't clean if you don't use that feature to keep your movies uptodate. Note: Clean Library deletes all movies that (still) can't be found on the file system, regardless whether it is '*in use*', so this may not be what you want.
+
+--
