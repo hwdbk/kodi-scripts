@@ -73,7 +73,7 @@ _kodi2local() { # kodipath - translate kodi db path to local representation ; wo
 	str=${str///*}  # special chr used for *
 	str=${str///?}  # special chr used for ?
 	str=${str///\"} # special chr used for "
-	if [[ $OSTYPE == darwin* ]] ; then str=$(syn2mac <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
+#	if [[ $OSTYPE == darwin* ]] ; then str=$(syn2mac <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
 	echo "$str"
 }
 
@@ -83,7 +83,7 @@ _local2kodi() { # [-sql] localPath - translate local path to kodi db representat
 	fi
 	local str=$1
 	if [[ $str == "$localroot"* ]] ; then str="$kodiroot${str#"$localroot"}" ; fi
-	if [[ $OSTYPE == darwin* ]] ; then str=$(mac2syn <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
+#	if [[ $OSTYPE == darwin* ]] ; then str=$(mac2syn <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
 	str=${str//\*/} # special chr used for *
 	str=${str//\?/} # special chr used for ?
 	str=${str//\"/} # special chr used for "
@@ -91,12 +91,13 @@ _local2kodi() { # [-sql] localPath - translate local path to kodi db representat
 }
 
 _createlocalindex() { # output_file - create a local index of files that are considered as database file candidates
-		local out=$1
-		echo "creating local index in $out" >&2
-		local printargs=(-printf "%TY%Tm%Td_%TH%TM%TS\t%s\t-\t%p\n")
-		local filter=(sed -e 's/\(^........_......\)\.[0-9]*\t/\1\t/') # filter to postprocess find output (note: can not contain proc | otherproc). here: strip the subsecond part of the timestamp
-		# carefully construct the index of files to be considered as database file sources
-		find -L "${localsources[@]}" -type f ! -path '*/@eaDir/*' "${nameargs[@]}" "${printargs[@]}" | "${filter[@]}" > "$out"
+	local out=$1
+	echo "creating local index in $out" >&2
+	local printargs=(-printf "%TY%Tm%Td_%TH%TM%TS\t%s\t-\t%p\n")
+	local filter=(sed -e 's/\(^........_......\)\.[0-9]*\t/\1\t/') # filter to postprocess find output (note: can not contain proc | otherproc). here: strip the subsecond part of the timestamp
+	# carefully construct the index of files to be considered as database file sources
+	find -L "${localsources[@]}" -type f ! -path '*/@eaDir/*' "${nameargs[@]}" "${printargs[@]}" | "${filter[@]}" > "$out"
+	if [[ $OSTYPE == darwin* ]] ; then mac2syn "$out" > "$out.tmp" ; mv "$out.tmp" "$out" ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
 }
 
 _urlencode_kodi() { # <string>
