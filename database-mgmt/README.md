@@ -138,10 +138,10 @@ usage: kodidb_check_replay source_MyVideos119.db (original/soure database to run
   - configure the `kodiroot` directory to the root path that is used on the kodi machine. Look in `.kodi/userdata/sources.xml` on the kodi system for the path or run `sqlite3 MyVideos119.db.org <<< "SELECT c22 FROM movie"` on the local system to see how the kodi path is constructed and how it relates to the local file system.
 - Run `kodidb_check -l` to check if the output makes sense.
 - Run `kodidb_check_replay MyVideos119.db.org` to create the sequence.
-- Check for errors in the stdout.log and stderr.log files in the output directories (grep -r ERROR does wonders).
+- Check for errors in the stdout.log and stderr.log files in the output directories (`grep -r ERROR` does wonders).
 - Review the results
 - Adjust the recipe and rerun the recipe from a given stage, e.g. `kodidb_check_replay 3` to rerun everything from the `--remap-foundone` step and onwards.
-- Note: the file system scan (from `localsources`) has an effect on which files are found/not found/duplicate. When this is changed or when the file system has changed structure/contents, delete `fileindex.fst` so it is rescanned next time and rerun from stage 3 to re-evaluate the found files.
+  - Note: the file system scan (from `localsources`) has an effect on which files are found/not found/duplicate. When this is changed or when the file system has changed structure/contents, delete `fileindex.fst` so it is rescanned next time and rerun from stage 3 to re-evaluate the found files.
 - Tweak and repeat until you're happy with the outcome.
 - On the "kodi" system:
   - Stop kodi by typing `systemctl stop kodi`
@@ -149,5 +149,6 @@ usage: kodidb_check_replay source_MyVideos119.db (original/soure database to run
   - Start kodi by typing `systemctl start kodi`
   - Update the artwork with the great tool from https://github.com/MilhouseVH/texturecache.py by typing `texturecache.py c`
   - Depending on your use case, clean the video library from the user interface or by typing `texturecache.py vclean`. Or don't clean if you don't use that feature to keep your movies uptodate. Note: Clean Library deletes all movies that (still) can't be found on the file system, regardless whether it is '*in use*', so this may not be what you want.
+  - Check in the Kodi UI if what you see is what you expect to see.
 
 --
