@@ -71,7 +71,7 @@ Constraints:
 - The script works off the MyVideos119.db database, not NFO files that may be stored alongside the media.
 
 Limitations:
-- The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \). I have no clue what a database looks like when Kodi is run as an application on a Windows computer.
+- The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \\). I have no clue what a database looks like when Kodi is run as an application on a Windows computer.
 - The 'local' system: tested on linux-gnu and darwin21 
 
 Dependencies:
