@@ -2,13 +2,22 @@
 
 Utility to check, clean up and manage the kodi media player database (MyVideos119.db)
 
-IMPORTANT: set up the localroot and kodiroot first in the script: they should point to the highest order directory that the kodi box shares
-with the local machine.
-constraints: movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
-limitations: does not scan or check for musicvideos, episodes, tvshows
-             tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (has / in the paths, not \)
-             tested on linux-gnu and darwin21 (Mac OS X will require bash >=4 (for mapfile), which can be obtained from MacPorts or Brew)
+IMPORTANT:
+- Definitions: "kodi" is referred to as the machine you run kodi on. This can be a linux computer, an embedded linux player (OpenELEC, CoreELEC etc.) or MacOSX. "local" is the machine you run these scripts on. This can be a linux computer or MacOSX. Theoretically, it could also be the embedded linux player, but I found the bash there not capable of using arrays.
+- Set up the `localroot` and `kodiroot` first in the script: they should point to the highest order directory that the kodi box shares
+with the local machine. The idea is that kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. localroot and kodiroot bring these together, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the two variables `localroot` and `kodiroot`.
+- The script does not touch (write/modify) your filesystem. It does read the file system to find files and check if (media) files and directories are there. This is to make sure the database, once put back on the kodi box, still works. If you're paranoid, you can mount the file system r/o and see that the script still works.
+- The script *does* modify the MyVideos119.db database. Always make a backup copy before attempting a cleanup. Hint: call the backup copy something different, like MyVideos119.db.org, so it can not accidentally be used by `kodidb_check`.
 
+Constraints:
+- Movies are not touched (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
+- Does not scan or check for musicvideos, episodes, tvshows. That's because I don't use these types of media. If you use these, they do not classify the scanned files as 'in use' and the files may be cleaned up. If you despereately
+Limitations:
+- The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \). I have no clue what a database looks like on a Windows kodi box.
+- The 'local' system: tested on linux-gnu and darwin21 
+Dependencies:
+- The script relies on bash >=4 (for the mapfile builtin function). MacOSX 'local' machines may need to install this from MacPorts or Brew.
+- The script uses mac2syn (https://github.com/hwdbk/synology-scripts/blob/master/mac-nfd-conversion/mac2syn) for converting MacOSX NFD (normalization form decomposed) UTF-8 strings to 'normal' UTF-8. The invocaiton is 'iffed' around an OSTYPE check, so if you're not running MacOSX as a local machine, it should not be a problem.
 
 ```
 usage: kodidb_check [options] [args]
