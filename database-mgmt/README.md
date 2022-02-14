@@ -102,7 +102,7 @@ usage: kodidb_check [options] [args]
               --rename-founddup oldstr newstr    remap files with duplicate matches after substituting oldstr with newstr in the full path
               --rename-notfound oldstr newstr    remap files which weren't found after substituting oldstr with newstr in the full path
 ```
-Note: for the 2nd set of options (starting with --summary) it is important to know that these run off the result of a `kodidb_check -l`. It then helps to store this result (a database dump, really) in an output file, e.g.:
+Note: for the 2nd set of options (starting with `--summary`) it is important to know that these run off the result of a `kodidb_check -l`. It then helps to store this result (a database dump, really) in an output file, e.g.:
 ```
 $ kodidb_check -l > t.lst
 $ kodidb_check --list-founddup --pick < t.lst
