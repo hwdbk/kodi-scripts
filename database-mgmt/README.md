@@ -76,7 +76,7 @@ Limitations:
 
 Dependencies:
 - The script uses sqlite3, which is the format of the Kodi databases.
-- The script relies on bash >=4 (for the mapfile builtin function). MacOSX 'local' machines may need to install a newer bash and/or sqlite3 from MacPorts or Brew.
+- The script relies on bash >=4 (for the mapfile builtin function). MacOSX 'local' machines may need to install a newer bash and/or sqlite3 from MacPorts or Brew (PS> when you do, the shebang (#!/bin/bash at the beginning) typically points to the wrong (v3) bash, so you need to adjust there).
 - The script uses mac2syn (https://github.com/hwdbk/synology-scripts/blob/master/mac-nfd-conversion/mac2syn) for converting MacOSX NFD (normalization form decomposed) UTF-8 strings to 'normal' UTF-8. The invocation is 'iffed' around an OSTYPE check, so if you're not running MacOSX as a local machine, it should not be a problem.
 
 ```
