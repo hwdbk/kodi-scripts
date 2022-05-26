@@ -25,7 +25,7 @@
 #kodidb_check -mw=2 /mnt/media/series/GoT/*.mp4
 
 # finally, cleanup and check
-kodidb_check --clean-root
+kodidb_check --clean-roots
 kodidb_check --check
 
 #EOF
