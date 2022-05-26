@@ -16,7 +16,7 @@ _usage() {
 	echo "    utilities for analysis and cleanup of the database (all commands read an output log formatted/produced by '$(basename "$0") -l' from stdin):" >&2
 	echo "              --summary                          print summary of the various categories of files in log" >&2
 	echo "              --delete-unref                     remove all read 'unref' file records from database (i.e. files that are labelled as 'unreferenced' in the log)" >&2
-	echo "              --clean-root                       cleanup the directory structure starting from the root dir in the database, insofar paths are not used" >&2
+	echo "              --clean-roots                      cleanup the directory structure starting from the root dir(s) in the database, insofar paths are not used" >&2
 	echo "              --remap-foundone                   remap all read 'foundone' files to the exact match listed in the log" >&2
 	echo "              --remap-foundlike                  remap all read 'foundlike' files to the almost exact match listed in the log (matched without extension)" >&2
 	echo "              --list-founddup [--pick]           list the read duplicate matches in a more readable form and, with --pick, present a prompt where the user can pick any of the found duplicates" >&2
@@ -41,13 +41,27 @@ cmdlog=history.log
 
 # CONSTANTS
 
-readonly localsources=(/mnt/media/video/movies /mnt/media/video/incoming)
-readonly localroot=/mnt/media/
-readonly kodiroot=smb://192.168.2.101/
 readonly extensions=( "*.ts" "*.mp4" "*.m4v" "*.mkv" "*.avi" "*.vob" "*.iso" "*.mov" "*.MOV" "*.wmv" "*.mpg" "*.mpeg" ) # note: the .MOV is only for camera files
+sources=() # kodi to local path mapping. format: "kodi-rootdir-path=local-rootdir-path". matching takes place in the order in which the mappings are added to the sources array (first match found counts).
+sources+=("/storage/video/movies/=/mnt/media/video/incoming/") # example
+sources+=("smb://192.168.2.10/share/=/mnt/media/share/")  # example
+sources+=("/var/media/320GB/=/mnt/usb/320GB/") # example
+sources+=("removable://=/mnt/usb/") # example
 
-# the --list output messages:
-readonly f_unref=(      "f_isunref_______" )
+_createlocalindex() { # output_file - create a local index of files that are considered as database file candidates
+	local out=$1
+	echo "creating local index in $out" >&2
+	local printargs=(-printf "%TY%Tm%Td_%TH%TM%TS\t%s\t-\t%p\n")
+	local filter=(sed -e 's/\(^........_......\)\.[0-9]*\t/\1\t/') # filter to postprocess find output (note: can not contain proc | otherproc). here: strip the subsecond part of the timestamp
+	# carefully construct the index of files to be considered as database file sources
+	local src ; local localsources=()
+	for src in "${sources[@]}" ; do localsources+=("${src#*=}") ; done
+	find -L "${localsources[@]}" -type f ! -path '*/@eaDir/*' "${nameargs[@]}" "${printargs[@]}" | "${filter[@]}" > "$out"
+	if [[ $OSTYPE == darwin* ]] ; then mac2syn "$out" > "$out.tmp" ; mv "$out.tmp" "$out" ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
+}
+
+# the --list output message prefixes:
+readonly f_unref=(      "f_unref_________" )
 readonly f_movie=(      "f_hasmovie______" )
 readonly f_bookmark=(   "f_hasbookmark___" )
 readonly f_playcount=(  "f_hasplaycount__" )
@@ -69,7 +83,11 @@ nameargs=("(") ; for (( n=0 ; n<${#extensions[@]} ; n++ )) ; do if (( n>0 )) ; t
 
 _kodi2local() { # kodipath - translate kodi db path to local representation ; works for dirs, files and full paths
 	local str=$1
-	if [[ $str == "$kodiroot"* ]] ; then str="$localroot${str#"$kodiroot"}" ; fi
+	local src
+	for src in "${sources[@]}" ; do
+		local kodiroot=${src%=*} ; local localroot=${src#*=}
+		if [[ $str == "$kodiroot"* ]] ; then str="$localroot${str#"$kodiroot"}" ; break ; fi
+	done
 	str=${str///*}  # special chr used for *
 	str=${str///?}  # special chr used for ?
 	str=${str///\"} # special chr used for "
@@ -82,7 +100,11 @@ _local2kodi() { # [-sql] localPath - translate local path to kodi db representat
 		shift ; set -- "$(_sqlescape "$1")"
 	fi
 	local str=$1
-	if [[ $str == "$localroot"* ]] ; then str="$kodiroot${str#"$localroot"}" ; fi
+	local src
+	for src in "${sources[@]}" ; do
+		local kodiroot=${src%=*} ; local localroot=${src#*=}
+		if [[ $str == "$localroot"* ]] ; then str="$kodiroot${str#"$localroot"}" ; break ; fi
+	done
 #	if [[ $OSTYPE == darwin* ]] ; then str=$(mac2syn <<< "$str") ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
 	str=${str//\*/} # special chr used for *
 	str=${str//\?/} # special chr used for ?
@@ -90,14 +112,22 @@ _local2kodi() { # [-sql] localPath - translate local path to kodi db representat
 	echo "$str"
 }
 
-_createlocalindex() { # output_file - create a local index of files that are considered as database file candidates
-	local out=$1
-	echo "creating local index in $out" >&2
-	local printargs=(-printf "%TY%Tm%Td_%TH%TM%TS\t%s\t-\t%p\n")
-	local filter=(sed -e 's/\(^........_......\)\.[0-9]*\t/\1\t/') # filter to postprocess find output (note: can not contain proc | otherproc). here: strip the subsecond part of the timestamp
-	# carefully construct the index of files to be considered as database file sources
-	find -L "${localsources[@]}" -type f ! -path '*/@eaDir/*' "${nameargs[@]}" "${printargs[@]}" | "${filter[@]}" > "$out"
-	if [[ $OSTYPE == darwin* ]] ; then mac2syn "$out" > "$out.tmp" ; mv "$out.tmp" "$out" ; fi # the Mac OS filesystems use a different flavour of UTF-8 encoding
+_isalocalroot() { # localPath - check if localPath is (one of) a local root
+	local src
+	for src in "${sources[@]}" ; do
+		local localroot=${src#*=}
+		if [[ $1 == "$localroot" ]] ; then return 0 ; fi
+	done
+	return 1
+}
+
+_isalocalpath() { # localPath - check if localPath is a local path, i.e. starts with one of the sources' localpath
+	local src
+	for src in "${sources[@]}" ; do
+		local localroot=${src#*=}
+		if [[ $1 == "$localroot"* ]] ; then return 0 ; fi
+	done
+	return 1
 }
 
 _urlencode_kodi() { # <string>
@@ -123,7 +153,8 @@ _sqlescape() { # str - escape a string for use in an sql query
 }
 
 _query() { # querystr - perform sql query
-	sqlite3 "$vdb" <<< "$1"
+	#echo "$1" >> query.log # debug
+	sqlite3 "$vdb" <<< "$1" 2>> query.log
 }
 
 _getcolumns() { # querystr var1 var2 ... - perform sql query and store result columns in bash variables var1, var2, ...
@@ -179,7 +210,7 @@ _getfileid() { # <string> - get an idFile from a) an idFile b) an existing local
 	local idFile=
 	if [[ $f =~ ^[0-9]*$ ]] ; then # it's a number - assume it is an id already
 		idFile=$(_query "SELECT idFile FROM files WHERE idFile=$f") # see if it exists in the database
-	elif _ismediafile "$f" && [[ -f $f || $f == "$localroot"* ]] ; then # it is a media file, existing localfile (file or symlink) or non-existing localpath in the right format
+	elif _ismediafile "$f" && [[ -f $f ]] || _isalocalpath "$f" ; then # it is a media file, existing localfile (file or symlink) or non-existing localpath in the right format
 		idFile=$(_findfile "$(_getfullpath "$f")")
 	elif [[ ( $f == *://* || $f == /*/* ) && $f != */ && $f != *@eaDir* ]] ; then # catch iso9660://DISK, removable://path and /var/media/.... , but make sure it is not a directory
 		idFile=$(_findfile "$f")
@@ -194,7 +225,7 @@ _getpathid() { # <string> - get an idPath from a) an idPath b) an existing local
 	local idPath=
 	if [[ $f =~ ^[0-9]*$ ]] ; then # it's a number - assume it is an id already
 		idPath=$(_query "SELECT idPath FROM path WHERE idPath=$f") # see if it exists in the database
-	elif [[ -d $f || $f == "$localroot"* ]] ; then # it is an existing localfile (directory or symlink) or non-existing localpath in the right format
+	elif [[ -d $f ]] || _isalocalpath "$f" ; then # it is an existing localfile (directory or symlink) or non-existing localpath in the right format
 		idPath=$(_findpath "$(_getfullpath "${f%/}/")") # make sure f ends with a /
 	elif [[ ( $f == *://* || $f == /* ) && $f == */ && $f != *@eaDir* ]] ; then # catch iso9660://DISK, removable://path and /var/media/.... , but must end in a /
 		idPath=$(_findpath "$f")
@@ -207,7 +238,7 @@ _getpathid() { # <string> - get an idPath from a) an idPath b) an existing local
 _createfile() { # [-g] localPath - create a (new) file in the database, attach it to the parent idPath and return its idFile (note: does not check if path exists in $localroot)
 	local debug= ; if [[ $1 == -g ]] ; then debug=-g ; shift ; fi
 	f=$(_getfullpath "$1")
-	if [[ $f != "$localroot"* ]] ; then echo ; return 1 ; fi # can only create paths where localPath is a subdirectory of $localroot
+	if ! _isalocalpath "$f" ; then echo ; return 1 ; fi # can only create paths where localPath is a subdirectory of $localroot
 	local idPath=$(_createpath $debug "$(dirname "$f")")
 	local idFile=$(_query "SELECT idFile FROM files WHERE idPath=$idPath AND strFilename='$(_local2kodi -sql "$(basename "$f")")'")
 	if [[ -n $idFile ]] ; then
@@ -222,11 +253,11 @@ _createfile() { # [-g] localPath - create a (new) file in the database, attach i
 
 _createpath() { # [-g] localPath - create a (new) path in the database, attach it to the parent idPath and return its idPath (note: does not check if path exists in $localroot)
 	local debug= ; if [[ $1 == -g ]] ; then debug=-g ; shift ; fi
-	if [[ $1 != "$localroot"* ]] ; then echo ; return 1 ; fi # can only create paths where localPath is a subdirectory of $localroot
+	if ! _isalocalpath "$1" ; then echo ; return 1 ; fi # can only create paths where localPath is a subdirectory of one of the sources
 	local sqlstr=$(_local2kodi -sql "${1%/}/") ; # make sure sqlstr always ends with a /
 	local idPath ; local idParentPath
 	# check if we're at the root - some MyVideos.db don't have the root path record (in fact, a lot of path records have no parent filled in)
-	if [[ $1 == "$localroot" ]] ; then
+	if _isalocalroot "$1" ; then
 		idPath=$(_query "SELECT idPath FROM path WHERE strPath='$sqlstr'")
 		if [[ -z $idPath ]] ; then
 			idPath=$(_query "INSERT INTO path (strPath) VALUES ('$sqlstr') ; SELECT LAST_INSERT_ROWID()")
@@ -526,9 +557,11 @@ if (( $# == 1 )) && [[ $1 == -c || $1 == --check ]] ; then
 	_query "SELECT p.idPath,p.strPath,q.idPath,q.strPath FROM path p, path q WHERE q.idPath=p.idParentPath" | while IFS='|' read a b c d ; do
 		if [[ "$d" != "$(dirname "$b")/" ]] ; then echo "ERROR: path $a=$b is not the parent of path $c=$d" >&2 ; fi
 	done
-	#  list paths that have no parent path (the root directory is excluded from this list as it is supposed not to have a parent) (shouldn't happen after fix)
-	_query "SELECT idPath,strPath FROM path WHERE IFNULL(idParentPath,'')='' AND strPath<>'$(_sqlescape "$kodiroot")'" |  while IFS='|' read a b ; do
-		echo "WARNING: path $a=$b has no parent path record" >&2
+	#  list paths that have no parent path (the root directories are excluded from this list as they are supposed not to have a parent) (shouldn't happen after fix)
+	_query "SELECT idPath,strPath FROM path WHERE IFNULL(idParentPath,'')=''" | while IFS='|' read a b ; do
+		if [[ -n $b ]] && ! _isalocalroot "$(_kodi2local "$b")" ; then
+			echo "WARNING: path $a=$b has no parent path record" >&2
+		fi
 	done
 	#  list files that have no name (yes, this does happen...)
 	_query "SELECT f.idFile,p.strPath FROM files f JOIN path p ON p.idPath=f.idPath WHERE f.strFilename=''" | while IFS='|' read a b ; do
@@ -587,8 +620,8 @@ if (( $# == 1 )) && [[ $1 == -l || $1 == --list ]] ; then
 		if [[ -n $content ]] ; then
 			echo -e "$p_content:\t$p\t$d\thas content '$content' and scraper '$scraper'"
 		fi
-		if [[ -z $parent && $d != "$localroot" ]] ; then
-			echo -e -n "$p_noparent:\t$p\t$d\thas no parent path id" && [[ $d == "$localroot"* ]] && echo -n " (can be fixed with -fp (--fix-paths))" ; echo
+		if [[ -z $parent ]] && ! _isalocalroot "$d" ; then
+			echo -e -n "$p_noparent:\t$p\t$d\thas no parent path id" && _isalocalpath "$d" && echo -n " (can be fixed with -fp (--fix-paths))" ; echo
 		fi
 		if [[ -d $d ]] ; then # d is a (link to) and existing directory
 			echo -e "$p_found:\t$p\t$d"
@@ -600,8 +633,11 @@ if (( $# == 1 )) && [[ $1 == -l || $1 == --list ]] ; then
 	_query "SELECT p.idPath,p.strPath FROM path p LEFT JOIN path q ON q.idParentPath=p.idPath LEFT JOIN files f ON f.idPath=p.idPath WHERE IFNULL(p.strContent,'')='' AND IFNULL(p.strScraper,'')='' AND IFNULL(q.idPath,'')='' AND IFNULL(f.idFile,'')=''" | while IFS='|' read a b ; do
 		echo -e "$p_unref:\t$a\t$(_kodi2local "$b")\tis a standalone (unreferenced) path and can be cleaned out"
 	done
-	# report the idPath of $kodiroot
-	echo -e "$p_root:\t$(_query "SELECT idPath FROM path WHERE strPath='$(_sqlescape "$kodiroot")'")\t$kodiroot"
+	# report the idPath of the root directories
+	for src in "${sources[@]}" ; do
+		kodiroot=${src%=*}
+		echo -e "$p_root:\t$(_query "SELECT idPath FROM path WHERE strPath='$(_sqlescape "$kodiroot")'")\t$kodiroot"
+	done
 }
 
 #false &&
@@ -702,9 +738,12 @@ if (( $# == 1 )) && [[ $1 == --delete-unref ]] ; then
 	exit 0
 fi
 
-if (( $# == 1 )) && [[ $1 == --clean-root ]] ; then
-	# read log from stdin and clean root path found in stdin
-	"$0" -db "$vdb" -dp "$localroot"
+if (( $# == 1 )) && [[ $1 == --clean-roots ]] ; then
+	# read log from stdin and clean root path(s) found in stdin
+	for src in "${sources[@]}" ; do
+		localroot=${src#*=}
+		"$0" -db "$vdb" -dp "$localroot"
+	done
 	exit 0
 fi
 
@@ -790,6 +829,16 @@ fi
 
 if (( $# == 2 )) && [[ $1 == -pp ]] ; then # find path
 	if ! _getpathid "$2" ; then exit 1 ; fi
+	exit 0
+fi
+
+if (( $# == 2 )) && [[ $1 == -cf ]] ; then # create file
+	if ! _createfile -g "$2" ; then exit 1 ; fi
+	exit 0
+fi
+
+if (( $# == 2 )) && [[ $1 == -cp ]] ; then # create path
+	if ! _createpath -g "$2" ; then exit 1 ; fi
 	exit 0
 fi
 
