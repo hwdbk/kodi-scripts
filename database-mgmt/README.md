@@ -23,7 +23,7 @@ Definitions:
   - The file is (i.e. is used by) a kodi movie (NOTE: the script doesn't do TV Shows or Music Videos)
   - The file was played (has a play count > 0)
   - The file playback was in progress (this is called a 'bookmark' and allows you to resume playback of the file where you left off)
-- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi. You can see what you've watched (or more importantly, what you've not watched yet, or which files are 'in progress' of watching: the bookmark is important to allow you to resume viewing where you left off last time.
+- Files that *are* in use need to be treated carefully - the watched state, for instance, particularly for files that are not movies, is an important indicator in the file browser interface in Kodi. You can see what you've watched through the tick mark (or more importantly, what you've not watched yet, or which files are 'in progress' of watching through the halfopen circle mark: the bookmark is important to allow you to resume viewing where you left off last time.
 - Files that are *not* in use don't need to be kept in the database. Why would you? Over the last 7 years that I've used Kodi, the database contracted around 35k files (and paths) that were just traversed or scanned at some time, then moved, removed, disappeared, but never played (in full or partial) or became used by a movie - these can all be cleaned out - no harm done. Finding and fixing the stuff that needs to be kept is the trick here. The script got me from:
 
 ```
@@ -58,17 +58,17 @@ p_unref_________: 5
 ```
 
 IMPORTANT:
-- Set up the `localroot` and `kodiroot` first in the script: they should point to the highest order directory that the kodi box shares
-with the local machine. The idea is that Kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. `localroot` and `kodiroot` bring these together, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the two variables `localroot` and `kodiroot`.
-- Secondly, set up the `localsources` variable - these is the list of local path(s) where the media can be found (in the script, `/mnt/media/video/movies /mnt/media/video/incoming` are used as an example, add more or less if necessary). The script will scan these directory trees, treat them as the master source to crossreference against the database, so the scanning can take a little while. The result is stored in `fileindex.fst`, and only scanned once (delete this file if the `localsources` change or the filesystem contents have changed, and it will be re-scanned).
+- First, set up the `sources` array. The script works off the concept that all media files are tied to one of the 'kodiroot' directories set up in the script: they should point to the highest order directory that the kodi box shares
+with the local machine. The idea is that Kodi has a certain view on the file system that holds the media, and the local machine has the same view, but a different root path. `sources` bring these together through a (root) path mapping, and, if necessary, also takes protocol into account. Kodi, for instance, can use paths that start with `smb://x.x.x.x/` and the local machine can have the media directory mounted on `/mnt/media/`, or `/Volumes/media` if you own a Mac. This will be different for every setup, hence the mapping. If you examine the `kodidb_check -l` output, you'll quickly see which paths kodi uses to access your media files. Some examples are given in the script.
+- Secondly, set up the `_createlocalindex()` function - this is where the list of local media files is constructed. The by default, the function will scan the directory trees referenced by the `sources` array (the localpath part), and treat them as the master source to crossreference against the database, so the scanning can take a little while. The result is stored in `fileindex.fst`, and only scanned once (delete this file if the `sources` change or the filesystem contents have changed, and it will be re-scanned).
 - The script does not touch (write/modify) your filesystem. It does read the file system to find files and check if (media) files and directories are there. This is to make sure the database, once put back on the kodi box, still works. If you're paranoid, you can mount the file system r/o and see that the script still works. Some command options don't even access the filesystem or `fileindex.fst` at all and run purely on the database.
-- I have no idea how the tool works if you have several removable disks with media; in theory, you could run a cleanup recipe several times and set up the `localroot` for each removable disk.
+- If you have multiple sources, like several removable disks with media or various shares with media, just add them the `sources` array by mapping the kodi view to the local view.
 - The script *does* modify the MyVideos119.db database. Always make a (or several) backup copies before attempting a cleanup. Hint: call the backup copy something different, like MyVideos119.db.org, so it can not accidentally be used by `kodidb_check`. Use the `kodi_check_replay` script to explicitly store and work on separate phases of the cleanup, with multiple backup points to retrace your steps.
 
 Constraints:
 - Movies are not touched, regardless whether they are watched or not (these can be cleaned up with 'Clean Library' in kodi or 'texturecache.py vclean' on the kodi machine)
-- Does not scan or check for Music Videos, Episodes, TV Shows, sorry... That's because I don't use these types of media. If you use these, they do not classify the scanned files as '*in use*' and the files may be cleaned up. If you despereately need this feature, drop me a line.
-- The script works off the MyVideos119.db database, not NFO files that may be stored alongside the media.
+- Does not scan or check for Music Videos, Episodes, TV Shows, Pictures, Music, sorry... That's because I don't use these types of media. If you use these, they do not classify the scanned files as '*in use*' and the files may be cleaned up. If you despereately need this feature, drop me a line.
+- The script works off the MyVideos119.db database, not `.NFO` files that may be stored alongside the media.
 
 Limitations:
 - The 'kodi' system: tested on version 119 of MyVideos.db, from a Kodi 19 'Matrix' running on an embedded linux player (so it has / in the kodi paths, not \\). I have no clue what a database looks like when Kodi is run as an application on a Windows computer.
@@ -94,7 +94,7 @@ usage: kodidb_check [options] [args]
     utilities for analysis and cleanup of the database (all commands read an output log formatted/produced by 'kodidb_check -l' from stdin):
               --summary                          print summary of the various categories of files in log
               --delete-unref                     remove all read 'unref' file records from database (i.e. files that are labelled as 'unreferenced' in the log)
-              --clean-root                       cleanup the directory structure starting from the root dir in the database, insofar paths are not used
+              --clean-roots                      cleanup the directory structure starting from the root dir(s) in the database, insofar paths are not used
               --remap-foundone                   remap all read 'foundone' files to the exact match listed in the log
               --remap-foundlike                  remap all read 'foundlike' files to the almost exact match listed in the log (matched without extension)
               --list-founddup [--pick]           list the read duplicate matches in a more readable form and, with --pick, present a prompt where the user can pick any of the found duplicates
@@ -121,7 +121,7 @@ The `kodidb_check_replay` runs a sequence of `kodidb_check` commands, typically 
 	5 run postfix
 ```
 
-The `postfix` script is given as an example to manually enter path and/or file remapping. Add special sqlite3 queries here or commands imported from history.log to tweak the last stage of the fix. It is a good idea to end the process with a `kodidb_check --clean-root`
+The `postfix` script is given as an example to manually enter path and/or file remapping. Add special sqlite3 queries here or commands imported from history.log to tweak the last stage of the fix. It is a good idea to end the process with a `kodidb_check --clean-roots`
 and `kodidb_check --check`, to remove any dangling (empty) directories and check the database once more.
 
 ```
