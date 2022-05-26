@@ -38,7 +38,11 @@ _makeindex() { # n - create a database dump/analysis (kodidb_check -l) on the da
 _runcmd() { # n cmd args - run cmd args on the database in . and store the result in dir (n)
 	local n=$1 ; local cmd=$2 ; shift 2
 	echo "processing: $cmd $@, saving result in '${d[n]}'"
-	$cmd "$@" <"${d[n-1]}/$dblistout" >"${d[n]}/$outstdout" 2>"${d[n]}/$outstderr" # execute cmd, read the $dblistout from previous output dir (n-1), write stdout and stderr to current output dir (n)
+	if [[ $cmd = "$kodidb_check" ]] ; then # read stdin from ${d[n-1]}/$dblistout
+		$cmd "$@" <"${d[n-1]}/$dblistout" >"${d[n]}/$outstdout" 2>"${d[n]}/$outstderr" # execute cmd, read the $dblistout from previous output dir (n-1), write stdout and stderr to current output dir (n)
+	else # plain command
+		$cmd "$@" >"${d[n]}/$outstdout" 2>"${d[n]}/$outstderr" # execute plain cmd, write stdout and stderr to current output dir (n)
+	fi
 	_makeindex $n
 }
 
